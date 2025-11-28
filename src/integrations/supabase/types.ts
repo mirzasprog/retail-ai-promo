@@ -451,7 +451,7 @@ export type Database = {
     Enums: {
       app_role: "admin" | "category_manager" | "viewer"
       campaign_status: "draft" | "active" | "completed" | "cancelled"
-      source_type: "api" | "html" | "csv"
+      source_type: "api" | "html" | "csv" | "json"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -581,7 +581,7 @@ export const Constants = {
     Enums: {
       app_role: ["admin", "category_manager", "viewer"],
       campaign_status: ["draft", "active", "completed", "cancelled"],
-      source_type: ["api", "html", "csv"],
+      source_type: ["api", "html", "csv", "json"],
     },
   },
 } as const
