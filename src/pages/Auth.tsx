@@ -31,7 +31,8 @@ const Auth = () => {
       setLoading(false);
     } else {
       toast.success("Uspješna prijava!");
-      navigate("/");
+      // Layout će automatski detektovati user promjenu i redirektovati
+      setLoading(false);
     }
   };
 
