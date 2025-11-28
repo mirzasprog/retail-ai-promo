@@ -5,3 +5,6 @@ verify_jwt = true
 
 [functions.weather-service]
 verify_jwt = true
+
+[functions.scrape-competitors]
+verify_jwt = true
