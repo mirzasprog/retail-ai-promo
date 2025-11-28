@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Campaigns from "./pages/Campaigns";
+import CampaignNew from "./pages/CampaignNew";
 import Reports from "./pages/Reports";
 import Admin from "./pages/Admin";
 import Auth from "./pages/Auth";
@@ -34,6 +35,14 @@ const App = () => (
             element={
               <Layout>
                 <Campaigns />
+              </Layout>
+            }
+          />
+          <Route
+            path="/campaigns/new"
+            element={
+              <Layout>
+                <CampaignNew />
               </Layout>
             }
           />
