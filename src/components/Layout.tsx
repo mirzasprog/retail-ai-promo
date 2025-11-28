@@ -33,28 +33,33 @@ const Layout = ({ children }: LayoutProps) => {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [profile, setProfile] = useState<any>(null);
+  const [authInitialized, setAuthInitialized] = useState(false);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        if (session?.user) {
-          setTimeout(() => {
-            fetchProfile(session.user.id);
-          }, 0);
-        }
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+
+      if (session?.user) {
+        setTimeout(() => {
+          fetchProfile(session.user.id);
+        }, 0);
       }
-    );
+
+      setAuthInitialized(true);
+    });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
-      
+
       if (session?.user) {
         fetchProfile(session.user.id);
       }
+
+      setAuthInitialized(true);
     });
 
     return () => subscription.unsubscribe();
@@ -65,17 +70,19 @@ const Layout = ({ children }: LayoutProps) => {
       .from("profiles")
       .select("*")
       .eq("id", userId)
-      .single();
+      .maybeSingle();
     setProfile(data);
   };
 
   useEffect(() => {
+    if (!authInitialized) return;
+
     if (!user && location.pathname !== "/auth") {
       navigate("/auth");
     } else if (user && location.pathname === "/auth") {
       navigate("/");
     }
-  }, [user, location.pathname, navigate]);
+  }, [user, location.pathname, navigate, authInitialized]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
