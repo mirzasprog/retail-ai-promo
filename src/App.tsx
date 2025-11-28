@@ -10,6 +10,11 @@ import CampaignNew from "./pages/CampaignNew";
 import CampaignEdit from "./pages/CampaignEdit";
 import Reports from "./pages/Reports";
 import Admin from "./pages/Admin";
+import AdminUsers from "./pages/admin/Users";
+import AdminApiKeys from "./pages/admin/ApiKeys";
+import AdminCompetitors from "./pages/admin/Competitors";
+import AdminHolidays from "./pages/admin/Holidays";
+import AdminSettings from "./pages/admin/Settings";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -68,6 +73,46 @@ const App = () => (
             element={
               <Layout>
                 <Admin />
+              </Layout>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <Layout>
+                <AdminUsers />
+              </Layout>
+            }
+          />
+          <Route
+            path="/admin/api-keys"
+            element={
+              <Layout>
+                <AdminApiKeys />
+              </Layout>
+            }
+          />
+          <Route
+            path="/admin/competitors"
+            element={
+              <Layout>
+                <AdminCompetitors />
+              </Layout>
+            }
+          />
+          <Route
+            path="/admin/holidays"
+            element={
+              <Layout>
+                <AdminHolidays />
+              </Layout>
+            }
+          />
+          <Route
+            path="/admin/settings"
+            element={
+              <Layout>
+                <AdminSettings />
               </Layout>
             }
           />
