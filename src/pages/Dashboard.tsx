@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -129,7 +130,7 @@ const Dashboard = () => {
             <CardDescription>Najkorištenije funkcije</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            <a href="/campaigns" className="block p-4 rounded-lg border hover:bg-accent transition-colors">
+            <Link to="/campaigns" className="block p-4 rounded-lg border hover:bg-accent transition-colors">
               <div className="flex items-center gap-3">
                 <Calendar className="h-5 w-5 text-primary" />
                 <div>
@@ -137,8 +138,8 @@ const Dashboard = () => {
                   <p className="text-sm text-muted-foreground">Kreiraj novu promocijsku kampanju</p>
                 </div>
               </div>
-            </a>
-            <a href="/admin" className="block p-4 rounded-lg border hover:bg-accent transition-colors">
+            </Link>
+            <Link to="/admin" className="block p-4 rounded-lg border hover:bg-accent transition-colors">
               <div className="flex items-center gap-3">
                 <ShoppingCart className="h-5 w-5 text-primary" />
                 <div>
@@ -146,7 +147,7 @@ const Dashboard = () => {
                   <p className="text-sm text-muted-foreground">Unesi novi artikal u bazu</p>
                 </div>
               </div>
-            </a>
+            </Link>
           </CardContent>
         </Card>
 
