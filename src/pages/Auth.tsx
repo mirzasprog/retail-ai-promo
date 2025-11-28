@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,26 @@ import { ShoppingCart, TrendingUp } from "lucide-react";
 const Auth = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+
+  // Provjeri da li je korisnik već prijavljen
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        console.log("Korisnik već prijavljen, redirektujem...");
+        navigate("/");
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("Auth state promjena:", event, session?.user?.email);
+      if (event === 'SIGNED_IN' && session) {
+        console.log("Korisnik se upravo prijavio, redirektujem...");
+        navigate("/");
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
