@@ -1,8 +1,11 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Settings, Database, Users, Key, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useNavigate } from "react-router-dom";
 
 const Admin = () => {
+  const navigate = useNavigate();
+
   return (
     <div className="space-y-6">
       <div>
@@ -20,7 +23,7 @@ const Admin = () => {
             <CardDescription>OpenAI i Weather API konfiguracija</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button variant="outline" className="w-full">
+            <Button variant="outline" className="w-full" onClick={() => navigate("/admin/api-keys")}>
               Podesi API Ključeve
             </Button>
           </CardContent>
@@ -35,7 +38,7 @@ const Admin = () => {
             <CardDescription>Upravljanje izvorima podataka konkurenata</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button variant="outline" className="w-full">
+            <Button variant="outline" className="w-full" onClick={() => navigate("/admin/competitors")}>
               Upravljaj Konkurentima
             </Button>
           </CardContent>
@@ -50,7 +53,7 @@ const Admin = () => {
             <CardDescription>Upravljanje pristupom i dozvolama</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button variant="outline" className="w-full">
+            <Button variant="outline" className="w-full" onClick={() => navigate("/admin/users")}>
               Upravljaj Korisnicima
             </Button>
           </CardContent>
@@ -65,7 +68,7 @@ const Admin = () => {
             <CardDescription>Definisanje godišnjih praznika</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button variant="outline" className="w-full">
+            <Button variant="outline" className="w-full" onClick={() => navigate("/admin/holidays")}>
               Uredi Praznike
             </Button>
           </CardContent>
@@ -80,7 +83,7 @@ const Admin = () => {
             <CardDescription>Default grad, intervali osvježavanja</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button variant="outline" className="w-full">
+            <Button variant="outline" className="w-full" onClick={() => navigate("/admin/settings")}>
               Opća Podešavanja
             </Button>
           </CardContent>
