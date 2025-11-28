@@ -145,6 +145,7 @@ export type Database = {
       competitors: {
         Row: {
           base_url: string
+          config_json: Json | null
           created_at: string | null
           id: string
           is_active: boolean | null
@@ -154,6 +155,7 @@ export type Database = {
         }
         Insert: {
           base_url: string
+          config_json?: Json | null
           created_at?: string | null
           id?: string
           is_active?: boolean | null
@@ -163,6 +165,7 @@ export type Database = {
         }
         Update: {
           base_url?: string
+          config_json?: Json | null
           created_at?: string | null
           id?: string
           is_active?: boolean | null
@@ -333,6 +336,33 @@ export type Database = {
           full_name?: string | null
           id?: string
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+      system_api_keys: {
+        Row: {
+          description: string | null
+          id: string
+          key_name: string
+          key_value: string
+          updated_at: string | null
+          updated_by: string | null
+        }
+        Insert: {
+          description?: string | null
+          id?: string
+          key_name: string
+          key_value: string
+          updated_at?: string | null
+          updated_by?: string | null
+        }
+        Update: {
+          description?: string | null
+          id?: string
+          key_name?: string
+          key_value?: string
+          updated_at?: string | null
+          updated_by?: string | null
         }
         Relationships: []
       }
