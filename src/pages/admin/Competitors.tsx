@@ -28,7 +28,7 @@ interface CompetitorPrice {
   regular_price: number | null;
   promo_price: number | null;
   competitor_id: string;
-  fetched_at: string;
+  fetched_at: string | null;
   competitor: {
     name: string;
   } | null;
@@ -93,7 +93,7 @@ const Competitors = () => {
           competitor:competitors(name)
         `)
         .order('fetched_at', { ascending: false })
-        .limit(10);
+        .limit(20);
 
       if (error) throw error;
       setRecentPrices(data || []);
@@ -120,13 +120,15 @@ const Competitors = () => {
       }
 
       const summary = data?.summary;
-      const totalPrices = summary?.totalPricesSaved ?? 0;
-      const totalCompetitors = summary?.totalCompetitors ?? 0;
-      const failed = summary?.failed ?? 0;
+      const totalPrices = summary?.totalPricesSaved ?? (
+        Array.isArray(data?.results)
+          ? data.results.reduce((sum: number, result: { productsFound?: number }) => sum + (result?.productsFound || 0), 0)
+          : 0
+      );
 
       toast({
         title: "Scraping je završen",
-        description: `Obrađeno konkurenata: ${totalCompetitors}, neuspješnih: ${failed}, prikupljeno cijena: ${totalPrices}.`,
+        description: `Prikupljeno je ${totalPrices} cijena.`,
       });
 
       await loadRecentPrices();
@@ -442,7 +444,7 @@ const Competitors = () => {
         <CardHeader>
           <CardTitle>Nedavno Prikupljene Cijene</CardTitle>
           <CardDescription>
-            Posljednjih 10 cijena prikupljenih sa konkurentskih stranica
+            Posljednjih 20 cijena prikupljenih sa konkurentskih stranica
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -480,7 +482,7 @@ const Competitors = () => {
                       {price.regular_price ? `${price.regular_price.toFixed(2)} KM` : '-'}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {new Date(price.fetched_at).toLocaleString('bs-BA')}
+                      {price.fetched_at ? new Date(price.fetched_at).toLocaleString('bs-BA') : '-'}
                     </TableCell>
                   </TableRow>
                 ))}

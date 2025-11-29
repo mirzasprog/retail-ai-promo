@@ -67,11 +67,12 @@ Deno.serve(async (req) => {
       try {
         // Use competitor-specific scraper
         const products = await scrapeCompetitor(competitor, firecrawl);
-        
+
         console.log(`[SCRAPER] Found ${products.length} products for ${competitor.name}`);
-        
+
         // Store products in database
         if (products.length > 0) {
+          const scrapedAt = new Date().toISOString();
           const priceData = products.map(product => ({
             competitor_id: competitor.id,
             product_name: product.name,
@@ -82,7 +83,7 @@ Deno.serve(async (req) => {
             product_ean: product.ean,
             promo_start_date: product.promoStartDate || null,
             promo_end_date: product.promoEndDate || null,
-            fetched_at: new Date().toISOString(),
+            fetched_at: scrapedAt,
           }));
 
           console.log(`[SCRAPER] Saving ${priceData.length} products to database for ${competitor.name}...`);
