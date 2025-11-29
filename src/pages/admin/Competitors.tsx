@@ -40,6 +40,7 @@ const Competitors = () => {
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
   const [recentPrices, setRecentPrices] = useState<CompetitorPrice[]>([]);
   const [loading, setLoading] = useState(false);
+  const [recentLoading, setRecentLoading] = useState(false);
   const [scraping, setScraping] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCompetitor, setEditingCompetitor] = useState<Competitor | null>(null);
@@ -83,6 +84,7 @@ const Competitors = () => {
   };
 
   const loadRecentPrices = async () => {
+    setRecentLoading(true);
     try {
       const { data, error } = await supabase
         .from('competitor_prices')
@@ -97,6 +99,13 @@ const Competitors = () => {
       setRecentPrices(data || []);
     } catch (error) {
       console.error('Error loading prices:', error);
+      toast({
+        title: "Greška",
+        description: "Nije moguće učitati prikupljene cijene",
+        variant: "destructive",
+      });
+    } finally {
+      setRecentLoading(false);
     }
   };
 
@@ -437,7 +446,12 @@ const Competitors = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {recentPrices.length === 0 ? (
+          {recentLoading ? (
+            <div className="text-center py-12">
+              <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-muted-foreground" />
+              <p className="text-muted-foreground">Učitavanje...</p>
+            </div>
+          ) : recentPrices.length === 0 ? (
             <div className="text-center py-12">
               <p className="text-muted-foreground">Nema prikupljenih cijena</p>
             </div>

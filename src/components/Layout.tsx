@@ -1,4 +1,4 @@
-import { ReactNode, useState, useEffect } from "react";
+import { ReactNode, useState, useEffect, useMemo } from "react";
 import { useNavigate, Link, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -18,10 +18,10 @@ import {
   LogOut,
   User,
   ShoppingCart,
-  TrendingUp,
   FileText,
 } from "lucide-react";
 import { Session, User as SupabaseUser } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
 
 interface LayoutProps {
   children: ReactNode;
@@ -33,6 +33,7 @@ const Layout = ({ children }: LayoutProps) => {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [profile, setProfile] = useState<any>(null);
+  const [userRole, setUserRole] = useState<Database["public"]["Enums"]["app_role"] | null>(null);
   const [authInitialized, setAuthInitialized] = useState(false);
 
   useEffect(() => {
@@ -45,6 +46,7 @@ const Layout = ({ children }: LayoutProps) => {
       if (session?.user) {
         setTimeout(() => {
           fetchProfile(session.user.id);
+          fetchRole(session.user.id);
         }, 0);
       }
 
@@ -57,6 +59,7 @@ const Layout = ({ children }: LayoutProps) => {
 
       if (session?.user) {
         fetchProfile(session.user.id);
+        fetchRole(session.user.id);
       }
 
       setAuthInitialized(true);
@@ -74,6 +77,22 @@ const Layout = ({ children }: LayoutProps) => {
     setProfile(data);
   };
 
+  const fetchRole = async (userId: string) => {
+    const { data, error } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Error fetching role", error);
+      toast.error("Nije moguće učitati korisničku ulogu");
+      return;
+    }
+
+    setUserRole(data?.role ?? null);
+  };
+
   useEffect(() => {
     if (!authInitialized) return;
 
@@ -84,18 +103,36 @@ const Layout = ({ children }: LayoutProps) => {
     }
   }, [user, location.pathname, navigate, authInitialized]);
 
+  useEffect(() => {
+    if (!userRole) return;
+
+    const adminOnlyPaths = ["/admin", "/admin/users", "/admin/api-keys", "/admin/competitors", "/admin/holidays", "/admin/settings"];
+    if (userRole !== "admin" && adminOnlyPaths.includes(location.pathname)) {
+      toast.warning("Nemate dozvolu za pristup admin modulu");
+      navigate("/");
+    }
+
+    if (userRole === "viewer" && location.pathname.startsWith("/campaigns")) {
+      toast.warning("Pregledni nalog nema pristup uređivanju kampanja");
+      navigate("/");
+    }
+  }, [userRole, location.pathname, navigate]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     toast.success("Uspješno ste se odjavili");
     navigate("/auth");
   };
 
-  const navItems = [
-    { path: "/", label: "Dashboard", icon: LayoutDashboard },
-    { path: "/campaigns", label: "Kampanje", icon: Megaphone },
-    { path: "/reports", label: "Izvještaji", icon: FileText },
-    { path: "/admin", label: "Admin", icon: Settings },
-  ];
+  const navItems = useMemo(
+    () => [
+      { path: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["admin", "category_manager", "viewer"] },
+      { path: "/campaigns", label: "Kampanje", icon: Megaphone, roles: ["admin", "category_manager"] },
+      { path: "/reports", label: "Izvještaji", icon: FileText, roles: ["admin", "category_manager", "viewer"] },
+      { path: "/admin", label: "Admin", icon: Settings, roles: ["admin"] },
+    ],
+    []
+  );
 
   if (!user) {
     return <>{children}</>;
@@ -116,20 +153,22 @@ const Layout = ({ children }: LayoutProps) => {
               </div>
             </Link>
             <nav className="hidden md:flex gap-1">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <Link key={item.path} to={item.path}>
-                    <Button
-                      variant={location.pathname === item.path ? "secondary" : "ghost"}
-                      className="gap-2"
-                    >
-                      <Icon className="h-4 w-4" />
-                      {item.label}
-                    </Button>
-                  </Link>
-                );
-              })}
+              {navItems
+                .filter((item) => (userRole ? item.roles.includes(userRole) : true))
+                .map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <Link key={item.path} to={item.path}>
+                      <Button
+                        variant={location.pathname === item.path ? "secondary" : "ghost"}
+                        className="gap-2"
+                      >
+                        <Icon className="h-4 w-4" />
+                        {item.label}
+                      </Button>
+                    </Link>
+                  );
+                })}
             </nav>
           </div>
           
@@ -142,6 +181,12 @@ const Layout = ({ children }: LayoutProps) => {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>Moj Nalog</DropdownMenuLabel>
+              {userRole && (
+                <DropdownMenuItem disabled className="flex justify-between">
+                  <span>Uloga</span>
+                  <span className="font-medium capitalize">{userRole.replace("_", " ")}</span>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout}>
                 <LogOut className="mr-2 h-4 w-4" />
