@@ -99,19 +99,27 @@ const Competitors = () => {
     try {
       const { data, error } = await supabase.functions.invoke('scrape-competitors');
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error from scrape-competitors function:', error);
+        throw error;
+      }
+
+      const summary = data?.summary;
+      const totalPrices = summary?.totalPricesSaved ?? 0;
+      const totalCompetitors = summary?.totalCompetitors ?? 0;
+      const failed = summary?.failed ?? 0;
 
       toast({
-        title: "Scraping završen",
-        description: `Prikupljeno ${data?.results?.length || 0} rezultata`,
+        title: "Scraping je završen",
+        description: `Obrađeno konkurenata: ${totalCompetitors}, neuspješnih: ${failed}, prikupljeno cijena: ${totalPrices}.`,
       });
 
       await loadRecentPrices();
     } catch (error) {
       console.error('Error scraping competitors:', error);
       toast({
-        title: "Greška",
-        description: "Scraping nije uspio",
+        title: "Greška pri scraping-u konkurenata",
+        description: "Provjerite API ključ i URL-ove konkurenata.",
         variant: "destructive",
       });
     } finally {

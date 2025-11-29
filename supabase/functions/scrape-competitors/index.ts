@@ -98,6 +98,7 @@ Deno.serve(async (req) => {
         results.push({
           competitor: competitor.name,
           success: false,
+          productsFound: 0,
           error: error instanceof Error ? error.message : 'Unknown error',
         });
       }
@@ -106,7 +107,14 @@ Deno.serve(async (req) => {
       await new Promise(resolve => setTimeout(resolve, 3000));
     }
 
-    return new Response(JSON.stringify({ results }), {
+    const summary = {
+      totalCompetitors: results.length,
+      successful: results.filter((r) => r.success).length,
+      failed: results.filter((r) => !r.success).length,
+      totalPricesSaved: results.reduce((sum, r) => sum + (r.productsFound || 0), 0),
+    };
+
+    return new Response(JSON.stringify({ summary, results }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
