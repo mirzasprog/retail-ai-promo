@@ -40,15 +40,23 @@ serve(async (req) => {
       );
     }
 
-    // Fetch competitor prices
+    // Fetch competitor prices for the same product (by EAN or name)
     const { data: competitorPrices } = await supabase
       .from("competitor_prices")
-      .select("*, competitors(*)")
-      .eq("product_ean", product.ean)
+      .select("*, competitors(name)")
+      .or(`product_ean.eq.${product.ean},product_name.ilike.%${product.name}%`)
       .order("fetched_at", { ascending: false })
-      .limit(5);
+      .limit(10);
 
-    // Get current context (weather, season, etc.)
+    // Get weather data
+    const { data: weatherData } = await supabase
+      .from("weather_snapshots")
+      .select("*")
+      .order("recorded_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    // Get current context (season, weekend, holidays)
     const now = new Date();
     const dayOfWeek = now.toLocaleDateString("bs-BA", { weekday: "long" });
     const month = now.getMonth() + 1;
@@ -64,26 +72,30 @@ serve(async (req) => {
       .gte("date", now.toISOString().split("T")[0])
       .lte("date", new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]);
 
-    // Build context for LLM
+    const isHoliday = holidays && holidays.length > 0;
+
+    // Build context for LLM in the exact format specified
     const context = {
       product: {
         name: product.name,
         category: product.category,
-        brand: product.brand,
-        regularPrice: product.regular_price,
-        seasonality: product.seasonality,
+        brand: product.brand || "",
+        regular_price: product.regular_price || 0,
       },
-      proposedPrice,
-      competitorPrices: competitorPrices?.map(cp => ({
-        competitor: cp.competitors?.name,
-        regularPrice: cp.regular_price,
-        promoPrice: cp.promo_price,
+      proposed_price: proposedPrice,
+      competitors: competitorPrices?.map(cp => ({
+        name: cp.competitors?.name || "Unknown",
+        regular_price: cp.regular_price || 0,
+        promo_price: cp.promo_price || 0,
       })) || [],
+      weather: {
+        temperature: weatherData?.temperature || 0,
+        type: weatherData?.weather_type || "unknown",
+      },
       context: {
-        dayOfWeek,
-        season,
-        isWeekend,
-        upcomingHolidays: holidays?.map(h => h.name) || [],
+        is_weekend: isWeekend,
+        is_holiday: isHoliday,
+        season: season,
       },
     };
 
@@ -99,10 +111,14 @@ serve(async (req) => {
 Tvoj zadatak je da analiziraš da li je artikal dobar kandidat za katalog/akciju i da li je predložena cijena dobra.
 
 Uzmi u obzir:
-- Cijene konkurenata
-- Trenutni kontekst (sezona, dan u sedmici, praznici)
-- Karakteristike proizvoda (sezonalnost, kategorija)
+- Cijene konkurenata (njihove redovne i akcijske cijene)
+- Trenutni kontekst (vrijeme, sezona, dan u sedmici, praznici)
+- Karakteristike proizvoda (sezonalnost, kategorija, brand)
 - Marže i profitabilnost
+- Tržišnu poziciju
+
+Ako artikal nije dobar za akciju, predloži alternativne proizvode iz iste kategorije.
+Ako je cijena loša, predloži bolju cijenu koja će biti konkurentna i profitabilna.
 
 VAŽNO: Odgovori SAMO u JSON formatu bez dodatnog teksta.`;
 
@@ -112,12 +128,17 @@ ${JSON.stringify(context, null, 2)}
 
 Odgovori u JSON formatu sa sljedećim poljima:
 {
-  "is_item_good": boolean,
-  "item_score": number (0-100),
-  "is_price_good": boolean,
-  "recommended_price": number ili null,
-  "recommended_substitutes": array proizvoda ili [],
-  "reasoning_bs": "Detaljno objašnjenje na bosanskom jeziku"
+  "is_item_good": boolean (da li je artikal dobar za akciju),
+  "item_score": number (0-100, kvalitet artikla za akciju),
+  "is_price_good": boolean (da li je predložena cijena dobra),
+  "recommended_price": number (preporučena cijena, ili null ako je trenutna dobra),
+  "recommended_substitutes": [
+    {
+      "name": "naziv proizvoda",
+      "reason": "razlog zašto je bolji"
+    }
+  ] (ako artikal nije dobar, predloži alternative),
+  "reasoning_bs": "Detaljno objašnjenje na bosanskom jeziku zašto je artikal dobar/loš i zašto je cijena dobra/loša. Uključi analizu konkurencije, konteksta, i tržišne pozicije."
 }`;
 
     const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
