@@ -97,6 +97,8 @@ export type Database = {
       }
       competitor_prices: {
         Row: {
+          brand: string | null
+          category: string | null
           competitor_id: string
           fetched_at: string | null
           id: string
@@ -109,6 +111,8 @@ export type Database = {
           regular_price: number | null
         }
         Insert: {
+          brand?: string | null
+          category?: string | null
           competitor_id: string
           fetched_at?: string | null
           id?: string
@@ -121,6 +125,8 @@ export type Database = {
           regular_price?: number | null
         }
         Update: {
+          brand?: string | null
+          category?: string | null
           competitor_id?: string
           fetched_at?: string | null
           id?: string
