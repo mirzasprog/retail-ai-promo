@@ -29,6 +29,9 @@ interface CompetitorPrice {
   promo_price: number | null;
   competitor_id: string;
   fetched_at: string;
+  competitor: {
+    name: string;
+  } | null;
 }
 
 const Competitors = () => {
@@ -83,7 +86,10 @@ const Competitors = () => {
     try {
       const { data, error } = await supabase
         .from('competitor_prices')
-        .select('*')
+        .select(`
+          *,
+          competitor:competitors(name)
+        `)
         .order('fetched_at', { ascending: false })
         .limit(10);
 
@@ -439,21 +445,25 @@ const Competitors = () => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Proizvod</TableHead>
-                  <TableHead>Akcijska Cijena</TableHead>
-                  <TableHead>Redovna Cijena</TableHead>
-                  <TableHead>Datum</TableHead>
+                  <TableHead>Konkurent</TableHead>
+                  <TableHead>Naziv artikla</TableHead>
+                  <TableHead>Akcijska cijena</TableHead>
+                  <TableHead>Redovna cijena</TableHead>
+                  <TableHead>Datum prikupljanja</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {recentPrices.map((price) => (
                   <TableRow key={price.id}>
-                    <TableCell className="font-medium">{price.product_name}</TableCell>
+                    <TableCell className="font-medium">
+                      {price.competitor?.name || 'N/A'}
+                    </TableCell>
+                    <TableCell>{price.product_name}</TableCell>
                     <TableCell>
-                      {price.promo_price ? `${price.promo_price} KM` : '-'}
+                      {price.promo_price ? `${price.promo_price.toFixed(2)} KM` : '-'}
                     </TableCell>
                     <TableCell>
-                      {price.regular_price ? `${price.regular_price} KM` : '-'}
+                      {price.regular_price ? `${price.regular_price.toFixed(2)} KM` : '-'}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {new Date(price.fetched_at).toLocaleString('bs-BA')}
