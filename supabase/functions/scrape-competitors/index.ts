@@ -53,11 +53,11 @@ type ParsedCandidate = { product: ScrapedProduct; rawBlock?: string };
 const COMPETITOR_CONFIGS: Record<string, ScraperConfig> = {
   Bingo: {
     selectors: {
-      productCard: 'li.product, article.product',
-      name: '.woocommerce-loop-product__title',
-      price: '.price ins .woocommerce-Price-amount, .price .woocommerce-Price-amount',
-      regularPrice: '.price del .woocommerce-Price-amount, .price del .amount',
-      currency: '.woocommerce-Price-currencySymbol',
+      productCard: '.products-list article.product, article.product, li.product, .product-grid .product',
+      name: 'h2 a, .product__title a, .product-title a, .woocommerce-loop-product__title',
+      price: '.price .woocommerce-Price-amount, .product-price .amount, .price .amount, .product__price .amount',
+      regularPrice: '.price del .woocommerce-Price-amount, .product-price del .amount, .price del .amount',
+      currency: '.woocommerce-Price-currencySymbol, .price .currency, .product-price .currency',
     },
   },
 };
@@ -224,7 +224,16 @@ Deno.serve(async (req) => {
 
 async function scrapeCompetitor(competitor: Competitor, config: ScraperConfig | null): Promise<ScrapedProduct[]> {
   console.log(`[SCRAPER] Starting scrape for ${competitor.name} at ${competitor.base_url}`);
+  const isBingo = competitor.name === 'Bingo';
+  const effectiveConfig = isBingo && !config ? COMPETITOR_CONFIGS.Bingo : config;
   const sourceType = (competitor.source_type?.toLowerCase() as SourceType) || 'html';
+
+  if (isBingo) {
+    console.log('[BINGO] start forced HTML scraping');
+    const bingoProducts = await scrapeHtmlSite(competitor, effectiveConfig);
+    console.log(`[BINGO] forced HTML scraper returned ${bingoProducts.length} products`);
+    return dedupeProducts(bingoProducts);
+  }
 
   // SPECIAL CASE: WooCommerce shop URL – prioritise WooCommerce API
   if (competitor.base_url.includes('/shop')) {
@@ -273,13 +282,33 @@ async function scrapeCompetitor(competitor: Competitor, config: ScraperConfig | 
 }
 
 async function scrapeHtmlSite(competitor: Competitor, config: ScraperConfig | null): Promise<ScrapedProduct[]> {
-  console.log(`[SCRAPER] Using HTML scraper for ${competitor.name}`);
+  const isBingo = competitor.name === 'Bingo';
+  if (isBingo) {
+    console.log('[BINGO] start HTML scraper');
+  } else {
+    console.log(`[SCRAPER] Using HTML scraper for ${competitor.name}`);
+  }
   const origin = normalizeOrigin(competitor.base_url);
   if (!origin) return [];
 
   const toVisit = new Set<string>([competitor.base_url]);
+  if (isBingo && competitor.base_url.replace(/\/?$/, '/') === `${origin}/shop/`) {
+    const bingoCategories = [
+      `${origin}/shop/televizori-i-dodaci`,
+      `${origin}/shop/bijela-tehnika`,
+      `${origin}/shop/racunarstvo-i-it`,
+      `${origin}/shop/igracke`,
+      `${origin}/shop/mali-kucanski-aparati`,
+      `${origin}/shop/majice`,
+    ];
+    bingoCategories.forEach((url) => toVisit.add(url));
+    console.log(`[BINGO] seeded category URLs: ${bingoCategories.length}`);
+  }
+
   const visited = new Set<string>();
   const collected: ParsedCandidate[] = [];
+  const visitLimit = isBingo ? 40 : 20;
+  const queueLimit = isBingo ? 120 : 100;
 
   const wooProducts = await scrapeWooCommerceStore(competitor.base_url, config);
   if (wooProducts.length > 0) {
@@ -292,22 +321,28 @@ async function scrapeHtmlSite(competitor: Competitor, config: ScraperConfig | nu
     console.log('[SCRAPER][HTML] WooCommerce API returned no products, continuing with DOM crawl');
   }
 
-  while (toVisit.size > 0 && visited.size < 20) {
+  while (toVisit.size > 0 && visited.size < visitLimit) {
     const [nextUrl] = Array.from(toVisit);
     toVisit.delete(nextUrl);
     if (visited.has(nextUrl)) continue;
     visited.add(nextUrl);
 
     try {
-      const html = await fetchText(nextUrl);
+      if (isBingo) {
+        console.log(`[BINGO] fetching URL: ${nextUrl}`);
+      }
+      const html = await fetchText(nextUrl, { competitorName: competitor.name });
       console.log(`[SCRAPER][HTML] Fetched ${nextUrl}, length=${html?.length || 0}`);
       if (!html) continue;
 
-      const domProducts = extractProductsFromDom(html, nextUrl, config);
+      const domProducts = extractProductsFromDom(html, nextUrl, config, competitor.name);
       console.log(`[SCRAPER][HTML] DOM extraction found ${domProducts.length} candidates on ${nextUrl}`);
-      const jsonProducts = extractProductsFromJsonLd(html, nextUrl).map((product) => ({ product, rawBlock: undefined }));
+      const jsonProducts = extractProductsFromJsonLd(html, nextUrl, competitor.name).map((product) => ({
+        product,
+        rawBlock: undefined,
+      }));
       console.log(`[SCRAPER][HTML] JSON-LD extraction found ${jsonProducts.length} candidates on ${nextUrl}`);
-      const cardProducts = extractProductsFromProductCards(html, nextUrl, config);
+      const cardProducts = extractProductsFromProductCards(html, nextUrl, config, competitor.name);
       console.log(`[SCRAPER][HTML] Card extraction found ${cardProducts.length} candidates on ${nextUrl}`);
       collected.push(...domProducts, ...jsonProducts, ...cardProducts);
 
@@ -317,13 +352,13 @@ async function scrapeHtmlSite(competitor: Competitor, config: ScraperConfig | nu
 
       const paginationLinks = extractPaginationLinks(html, origin, nextUrl);
       for (const link of paginationLinks) {
-        if (!visited.has(link) && toVisit.size < 100) {
+        if (!visited.has(link) && toVisit.size < queueLimit) {
           toVisit.add(link);
         }
       }
 
-      for (const link of extractLinks(html, origin)) {
-        if (!visited.has(link) && toVisit.size < 100) {
+      for (const link of extractLinks(html, origin, { competitorName: competitor.name })) {
+        if (!visited.has(link) && toVisit.size < queueLimit) {
           toVisit.add(link);
         }
       }
@@ -334,6 +369,9 @@ async function scrapeHtmlSite(competitor: Competitor, config: ScraperConfig | nu
 
   console.log(`[SCRAPER] HTML scraper visited ${visited.size} pages for ${competitor.name}`);
   console.log(`[SCRAPER] HTML scraper collected ${collected.length} raw candidates before normalization for ${competitor.name}`);
+  if (isBingo) {
+    console.log(`[BINGO] sending ${collected.length} candidates to finalizeCandidates`);
+  }
   return await finalizeCandidates(collected, config, 'html');
 }
 
@@ -506,7 +544,7 @@ async function scrapeWooCommerceStore(baseUrl: string, config: ScraperConfig | n
   }
 }
 
-function extractProductsFromJsonLd(html: string, sourceUrl: string): ScrapedProduct[] {
+function extractProductsFromJsonLd(html: string, sourceUrl: string, competitorName?: string): ScrapedProduct[] {
   const scripts = Array.from(html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi));
   const products: ScrapedProduct[] = [];
 
@@ -562,15 +600,27 @@ function extractProductsFromJsonLd(html: string, sourceUrl: string): ScrapedProd
     }
   }
 
+  if (competitorName === 'Bingo') {
+    console.log(`[BINGO] JSON-LD candidates: ${products.length} on ${sourceUrl}`);
+  }
   console.log(`[EXTRACTOR] Found ${products.length} JSON-LD products in ${sourceUrl}`);
   return products;
 }
 
-function extractProductsFromDom(html: string, sourceUrl: string, config: ScraperConfig | null): ParsedCandidate[] {
+function extractProductsFromDom(
+  html: string,
+  sourceUrl: string,
+  config: ScraperConfig | null,
+  competitorName?: string
+): ParsedCandidate[] {
   const $ = loadHtml(html);
   const selectors = config?.selectors || {};
   const productSelector = selectors.productCard || 'li.product, article, .product, .product-card, .item';
   const products: ParsedCandidate[] = [];
+
+  if (competitorName === 'Bingo') {
+    console.log(`[BINGO] extractProductsFromDom start for ${sourceUrl}`);
+  }
 
   $(productSelector).each((_, element) => {
     const rawBlock = $(element).html() || '';
@@ -629,17 +679,30 @@ function extractProductsFromDom(html: string, sourceUrl: string, config: Scraper
     }
   });
 
+  if (competitorName === 'Bingo') {
+    console.log(`[BINGO] DOM candidates: ${products.length} on ${sourceUrl}`);
+  }
+
   if (products.length === 0) {
     console.log(`[EXTRACTOR] DOM selectors returned no products for ${sourceUrl}, falling back to regex card parsing`);
-    return extractProductsFromProductCards(html, sourceUrl, config);
+    return extractProductsFromProductCards(html, sourceUrl, config, competitorName);
   }
 
   console.log(`[EXTRACTOR] Found ${products.length} DOM products in HTML from ${sourceUrl}`);
   return products;
 }
 
-function extractProductsFromProductCards(html: string, sourceUrl: string, config: ScraperConfig | null): ParsedCandidate[] {
+function extractProductsFromProductCards(
+  html: string,
+  sourceUrl: string,
+  config: ScraperConfig | null,
+  competitorName?: string
+): ParsedCandidate[] {
   const products: ParsedCandidate[] = [];
+
+  if (competitorName === 'Bingo') {
+    console.log(`[BINGO] extractProductsFromProductCards start for ${sourceUrl}`);
+  }
 
   const productBlocks = Array.from(html.matchAll(/<article[\s\S]*?<\/article>/gi));
   const listBlocks = Array.from(html.matchAll(/<li[^>]+class="[^"]*product[^"]*"[^>]*>[\s\S]*?<\/li>/gi));
@@ -691,6 +754,10 @@ function extractProductsFromProductCards(html: string, sourceUrl: string, config
     if (name && !isNaN(price)) {
       products.push({ product: { name: name.trim().slice(0, 250), promoPrice: price, currency }, rawBlock: match[0] });
     }
+  }
+
+  if (competitorName === 'Bingo') {
+    console.log(`[BINGO] CARD candidates: ${products.length} on ${sourceUrl}`);
   }
 
   console.log(`[EXTRACTOR] Found ${products.length} products in HTML from ${sourceUrl}`);
@@ -1063,7 +1130,7 @@ function normalizeOrigin(url: string): string | null {
   }
 }
 
-async function fetchText(url: string): Promise<string | null> {
+async function fetchText(url: string, options?: { competitorName?: string }): Promise<string | null> {
   const response = await fetch(url, {
     headers: {
       'User-Agent': 'retail-ai-promo-scraper/1.0',
@@ -1072,8 +1139,15 @@ async function fetchText(url: string): Promise<string | null> {
   });
 
   if (!response.ok) {
+    if (options?.competitorName === 'Bingo') {
+      console.log(`[BINGO] non-200 status ${response.status} for ${url}`);
+    }
     console.warn(`[SCRAPER] Request failed for ${url} with status ${response.status}`);
     return null;
+  }
+
+  if (options?.competitorName === 'Bingo') {
+    console.log(`[BINGO] fetch successful for ${url}`);
   }
 
   return response.text();
@@ -1115,15 +1189,25 @@ function extractPaginationLinks(html: string, origin: string, currentUrl: string
   return Array.from(links);
 }
 
-function extractLinks(html: string, origin: string): string[] {
+function extractLinks(html: string, origin: string, options?: { competitorName?: string }): string[] {
   const links = new Set<string>();
   const anchorMatches = html.matchAll(/<a[^>]+href=["']([^"']+)["']/gi);
+  const isBingo = options?.competitorName === 'Bingo';
 
   for (const match of anchorMatches) {
     try {
       const href = match[1];
       const url = new URL(href, origin);
       if (url.origin === origin) {
+        if (isBingo) {
+          const path = url.pathname;
+          const isShopPath = path.startsWith('/shop');
+          const hasPage = url.searchParams.has('page') || /page/gi.test(path);
+          const isCategory = isShopPath && path.split('/').filter(Boolean).length >= 2;
+          if (!isShopPath || !(hasPage || isCategory)) {
+            continue;
+          }
+        }
         links.add(url.toString());
       }
     } catch (_err) {
