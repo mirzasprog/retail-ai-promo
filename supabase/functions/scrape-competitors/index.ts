@@ -182,6 +182,13 @@ async function scrapeCompetitor(competitor: Competitor, firecrawl: any): Promise
 
   const sourceType = competitor.source_type?.toLowerCase() as SourceType;
 
+  // Try WooCommerce Store API first (many shops expose it publicly)
+  const apiProducts = await scrapeWooCommerceStore(competitor.base_url);
+  if (apiProducts.length > 0) {
+    console.log(`[SCRAPER] Using WooCommerce Store API results for ${competitor.name}`);
+    return apiProducts;
+  }
+
   if (sourceType === 'pdf') {
     console.log('[SCRAPER] PDF source detected for competitor', competitor.name);
     return scrapeRobotPdf(competitor, firecrawl);
@@ -267,6 +274,75 @@ async function scrapeHtmlSite(competitor: Competitor, firecrawl: any): Promise<P
   console.log(`[SCRAPER] Parsed ${deduped.length} unique products for ${competitor.name}`);
 
   return deduped.slice(0, 150);
+}
+
+async function scrapeWooCommerceStore(baseUrl: string): Promise<Product[]> {
+  try {
+    const origin = normalizeOrigin(baseUrl);
+    const perPage = 100;
+    const maxPages = 20;
+    const collected: Product[] = [];
+
+    if (!origin) {
+      return collected;
+    }
+
+    for (let page = 1; page <= maxPages; page++) {
+      const apiUrl = `${origin}/wp-json/wc/store/products?page=${page}&per_page=${perPage}`;
+      console.log(`[SCRAPER] Fetching WooCommerce products from ${apiUrl}`);
+
+      const response = await fetch(apiUrl, {
+        headers: {
+          'User-Agent': 'retail-ai-promo-scraper/1.0',
+          'Accept': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        console.warn(`[SCRAPER] WooCommerce API returned status ${response.status} for ${apiUrl}`);
+        break;
+      }
+
+      const products = await response.json();
+      if (!Array.isArray(products) || products.length === 0) {
+        console.log(`[SCRAPER] No more WooCommerce products after page ${page}`);
+        break;
+      }
+
+      for (const product of products) {
+        const prices = product?.prices || {};
+        const rawPrice = prices?.sale_price || prices?.price || prices?.regular_price;
+        const numericPrice = normalizePrice(String(rawPrice ?? ''));
+
+        if (!product?.name || isNaN(numericPrice)) {
+          continue;
+        }
+
+        collected.push({
+          name: String(product.name).trim().slice(0, 250),
+          promoPrice: numericPrice,
+          regularPrice: prices?.regular_price ? normalizePrice(String(prices.regular_price)) : undefined,
+          brand: product?.brands?.[0]?.name || undefined,
+          category: product?.categories?.[0]?.name || undefined,
+          ean: product?.gtin || product?.sku || undefined,
+        });
+      }
+
+      // WooCommerce returns total via header; stop if fewer results than perPage
+      if (products.length < perPage) {
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    const deduped = dedupeProducts(collected);
+    console.log(`[SCRAPER] WooCommerce API yielded ${deduped.length} products`);
+    return deduped;
+  } catch (error) {
+    console.warn('[SCRAPER] WooCommerce API scrape failed, falling back to HTML scraping:', error);
+    return [];
+  }
 }
 
 async function scrapeRobotPdf(competitor: Competitor, firecrawl: any): Promise<Product[]> {
@@ -487,4 +563,14 @@ function normalizePrice(raw: string | number): number {
   }
 
   return parseFloat(raw.replace(/[^\d.,-]/g, '').replace(',', '.'));
+}
+
+function normalizeOrigin(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch (error) {
+    console.warn('[SCRAPER] Invalid URL provided for competitor:', url, error);
+    return null;
+  }
 }
