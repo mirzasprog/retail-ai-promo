@@ -184,7 +184,11 @@ async function scrapeCompetitor(competitor: Competitor, firecrawl: any): Promise
   }
 
   try {
-    if (competitor.base_url.toLowerCase().endsWith('.pdf')) {
+    const isPdfSource =
+      competitor.source_type?.toLowerCase() === 'pdf' ||
+      competitor.base_url.toLowerCase().endsWith('.pdf');
+
+    if (isPdfSource) {
       return await scrapeRobotPdf(competitor, firecrawl);
     }
 
