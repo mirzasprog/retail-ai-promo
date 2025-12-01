@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
-import FirecrawlApp from 'https://esm.sh/@mendable/firecrawl-js@1.0.0';
+import FirecrawlApp from 'https://esm.sh/@mendable/firecrawl-js@4.7.0';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
     const firecrawlApiKey = Deno.env.get('FIRECRAWL_API_KEY');
     if (!firecrawlApiKey) {
       console.error('[SCRAPER] FIRECRAWL_API_KEY not configured');
-      throw new Error('FIRECRAWL_API_KEY not configured - please add it in Supabase Edge Function Secrets');
+      throw new Error('FIRECRAWL_API_KEY not configured - please add it in Lovable Cloud Edge Function Secrets');
     }
 
     const firecrawl = new FirecrawlApp({ apiKey: firecrawlApiKey });
@@ -183,8 +183,8 @@ async function scrapeCompetitor(competitor: Competitor, firecrawl: any): Promise
   const sourceType = competitor.source_type?.toLowerCase() as SourceType;
 
   if (sourceType === 'pdf') {
-    console.log('[SCRAPER] PDF source detected for competitor', competitor.name);
-    return [];
+    console.log('[SCRAPER] PDF source detected for competitor', competitor.name, competitor.base_url);
+    return await scrapeRobotPdf(competitor, firecrawl);
   }
 
   if (sourceType !== 'html') {
@@ -192,31 +192,24 @@ async function scrapeCompetitor(competitor: Competitor, firecrawl: any): Promise
     return [];
   }
 
-  if (!competitor.base_url.includes('robot.ba')) {
-    console.log(`[SCRAPER] Skipping ${competitor.name} because only robot.ba scraping is supported in this version.`);
-    return [];
+  // HTML sources
+  if (competitor.base_url.includes('robot.ba')) {
+    console.log('[SCRAPER] Using robot.ba specific HTML scraper for', competitor.name);
+    return await scrapeRobotSite(competitor, firecrawl);
   }
 
-  try {
-    return await scrapeRobotSite(competitor, firecrawl);
-  } catch (error) {
-    console.error(`[SCRAPER] Error scraping ${competitor.name}:`, error);
-    if (error instanceof Error) {
-      console.error(`[SCRAPER] Error details: ${error.message}`);
-      console.error(`[SCRAPER] Stack trace:`, error.stack);
-    }
-    return [];
-  }
+  console.log('[SCRAPER] Using generic HTML scraper for competitor', competitor.name, competitor.base_url);
+  return await scrapeGenericHtmlSite(competitor, firecrawl);
 }
 
 async function scrapeRobotSite(competitor: Competitor, firecrawl: any): Promise<Product[]> {
   console.log(`[SCRAPER] Using robot.ba specific scraper for ${competitor.name}`);
 
   const crawlResult = await firecrawl.crawlUrl(competitor.base_url, {
-    limit: 500,
+    limit: 150,
     maxDepth: 3,
     crawlerOptions: {
-      limit: 500,
+      limit: 150,
       maxDepth: 3,
       includePaths: ['/shop', '/shop.*', '/shop/.*'],
       allowExternalLinks: false,
@@ -238,6 +231,7 @@ async function scrapeRobotSite(competitor: Competitor, firecrawl: any): Promise<
     console.error(`[SCRAPER] Firecrawl failed for ${competitor.name}: ${errorMessage}`);
     return [];
   }
+
   const collectedProducts: Product[] = [];
 
   for (const page of crawlResult.data) {
@@ -260,8 +254,54 @@ async function scrapeRobotSite(competitor: Competitor, firecrawl: any): Promise<
   return deduped.slice(0, 150);
 }
 
+async function scrapeGenericHtmlSite(competitor: Competitor, firecrawl: any): Promise<Product[]> {
+  console.log(`[SCRAPER] Using generic HTML scraper for ${competitor.name}`);
+
+  const crawlResult = await firecrawl.crawlUrl(competitor.base_url, {
+    limit: 60,
+    maxDepth: 2,
+    scrapeOptions: {
+      formats: ['html'],
+      onlyMainContent: false,
+      waitFor: 1500,
+      timeout: 45000,
+    },
+  });
+
+  console.log(
+    `[SCRAPER] Firecrawl (generic) returned ${crawlResult?.data?.length || 0} pages for ${competitor.name}`
+  );
+
+  if (!crawlResult?.success || !Array.isArray(crawlResult.data)) {
+    const errorMessage = crawlResult?.error || 'Unknown Firecrawl error';
+    console.error(`[SCRAPER] Firecrawl (generic) failed for ${competitor.name}: ${errorMessage}`);
+    return [];
+  }
+
+  const collectedProducts: Product[] = [];
+
+  for (const page of crawlResult.data) {
+    const pageUrl = page.url || competitor.base_url;
+    const html = page.html as string | undefined;
+
+    if (!html) {
+      continue;
+    }
+
+    const jsonProducts = extractProductsFromJsonLd(html, pageUrl);
+    const cardProducts = extractProductsFromProductCards(html, pageUrl);
+
+    collectedProducts.push(...jsonProducts, ...cardProducts);
+  }
+
+  const deduped = dedupeProducts(collectedProducts);
+  console.log(`[SCRAPER] Parsed ${deduped.length} unique products (generic) for ${competitor.name}`);
+
+  return deduped.slice(0, 150);
+}
+
 async function scrapeRobotPdf(competitor: Competitor, firecrawl: any): Promise<Product[]> {
-  console.log(`[SCRAPER] Using robot.ba PDF scraper for ${competitor.name}`);
+  console.log(`[SCRAPER] Using PDF scraper for ${competitor.name}`);
 
   const scrapeResult = await firecrawl.scrapeUrl(competitor.base_url, {
     formats: ['markdown', 'text'],
