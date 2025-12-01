@@ -48,12 +48,12 @@ const Competitors = () => {
     name: string;
     base_url: string;
     source_type: "api" | "csv" | "html" | "json" | "pdf";
-    refresh_interval: number;
+    refresh_interval: string;
   }>({
     name: "",
     base_url: "",
     source_type: "html",
-    refresh_interval: 3600,
+    refresh_interval: "3600",
   });
 
   const loadCompetitors = useCallback(async () => {
@@ -176,7 +176,7 @@ const Competitors = () => {
         name: competitor.name,
         base_url: competitor.base_url,
         source_type: competitor.source_type as "api" | "csv" | "html" | "json" | "pdf",
-        refresh_interval: competitor.refresh_interval,
+        refresh_interval: String(competitor.refresh_interval ?? ""),
       });
     } else {
       setEditingCompetitor(null);
@@ -184,7 +184,7 @@ const Competitors = () => {
         name: "",
         base_url: "",
         source_type: "html",
-        refresh_interval: 3600,
+        refresh_interval: "3600",
       });
     }
     setDialogOpen(true);
@@ -200,11 +200,28 @@ const Competitors = () => {
       return;
     }
 
+    const parsedRefreshInterval = parseInt(formData.refresh_interval, 10);
+    if (isNaN(parsedRefreshInterval) || parsedRefreshInterval <= 0) {
+      toast({
+        title: "Greška",
+        description: "Interval osvježavanja mora biti pozitivan broj",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const payload = {
+      name: formData.name.trim(),
+      base_url: formData.base_url.trim(),
+      source_type: formData.source_type,
+      refresh_interval: parsedRefreshInterval,
+    };
+
     try {
       if (editingCompetitor) {
         const { error } = await supabase
           .from('competitors')
-          .update(formData)
+          .update(payload)
           .eq('id', editingCompetitor.id);
 
         if (error) throw error;
@@ -216,7 +233,7 @@ const Competitors = () => {
       } else {
         const { error } = await supabase
           .from('competitors')
-          .insert([{ ...formData, is_active: true }]);
+          .insert([{ ...payload, is_active: true }]);
 
         if (error) throw error;
 
@@ -227,6 +244,7 @@ const Competitors = () => {
       }
 
       setDialogOpen(false);
+      setEditingCompetitor(null);
       await loadCompetitors();
     } catch (error) {
       console.error('Error saving competitor:', error);
@@ -350,7 +368,7 @@ const Competitors = () => {
                 id="refresh_interval"
                 type="number"
                 value={formData.refresh_interval}
-                onChange={(e) => setFormData({ ...formData, refresh_interval: parseInt(e.target.value) })}
+                onChange={(e) => setFormData({ ...formData, refresh_interval: e.target.value })}
               />
             </div>
             <div className="flex gap-2 justify-end">
