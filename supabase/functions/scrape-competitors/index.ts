@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
-import FirecrawlApp from 'https://esm.sh/@mendable/firecrawl-js@1.0.0';
+import FirecrawlApp from 'https://esm.sh/@mendable/firecrawl-js@4.7.0';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -194,12 +194,9 @@ async function scrapeCompetitor(competitor: Competitor, firecrawl: any): Promise
     return scrapeRobotPdf(competitor, firecrawl);
   }
 
-  if (sourceType && sourceType !== 'html') {
-    console.log('[SCRAPER] Unknown source_type for competitor', competitor.name, competitor.source_type);
-    return [];
-  }
-
+  // For all other source types (html, api, json, csv, unknown), fall back to generic HTML scraping
   try {
+    console.log('[SCRAPER] Using generic HTML scraper for source_type', competitor.source_type, 'for', competitor.name);
     return await scrapeHtmlSite(competitor, firecrawl);
   } catch (error) {
     console.error(`[SCRAPER] Error scraping ${competitor.name}:`, error);
