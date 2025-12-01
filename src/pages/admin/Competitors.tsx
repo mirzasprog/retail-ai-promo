@@ -3,17 +3,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Download, RefreshCw, Plus, Edit, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, RefreshCw, Plus, Edit, Trash2, Info } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Database } from "@/integrations/supabase/types";
+import { Textarea } from "@/components/ui/textarea";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 type SourceType = Database["public"]["Enums"]["source_type"];
+type ScraperConfig = Database["public"]["Tables"]["competitors"]["Row"]["config_json"];
 
 interface Competitor {
   id: string;
@@ -23,6 +26,14 @@ interface Competitor {
   is_active: boolean;
   refresh_interval: number;
   created_at: string;
+  config_json: ScraperConfig | null;
+}
+
+interface ScrapeResult {
+  competitor: string;
+  success: boolean;
+  productsFound: number;
+  error?: string | null;
 }
 
 interface CompetitorPrice {
@@ -52,12 +63,15 @@ const Competitors = () => {
     base_url: string;
     source_type: SourceType;
     refresh_interval: string;
+    config_json: string;
   }>({
     name: "",
     base_url: "",
     source_type: "html",
     refresh_interval: "3600",
+    config_json: "",
   });
+  const [scrapeResults, setScrapeResults] = useState<ScrapeResult[]>([]);
 
   const loadCompetitors = useCallback(async () => {
     setLoading(true);
@@ -129,6 +143,8 @@ const Competitors = () => {
           : 0
       );
 
+      setScrapeResults(Array.isArray(data?.results) ? data?.results : []);
+
       toast({
         title: "Scraping je završen",
         description: `Prikupljeno je ${totalPrices} cijena.`,
@@ -180,6 +196,7 @@ const Competitors = () => {
         base_url: competitor.base_url,
         source_type: competitor.source_type,
         refresh_interval: String(competitor.refresh_interval ?? ""),
+        config_json: competitor.config_json ? JSON.stringify(competitor.config_json, null, 2) : "",
       });
     } else {
       setEditingCompetitor(null);
@@ -188,6 +205,7 @@ const Competitors = () => {
         base_url: "",
         source_type: "html",
         refresh_interval: "3600",
+        config_json: "",
       });
     }
     setDialogOpen(true);
@@ -215,11 +233,26 @@ const Competitors = () => {
 
     const normalizedSourceType = (formData.source_type || "html").toLowerCase() as SourceType;
 
+    let parsedConfig: ScraperConfig | null = null;
+    if (formData.config_json.trim()) {
+      try {
+        parsedConfig = JSON.parse(formData.config_json) as ScraperConfig;
+      } catch (error) {
+        toast({
+          title: "Nevažeći JSON konfiguracije",
+          description: "Provjerite da li je konfiguracija validan JSON.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     const payload = {
       name: formData.name.trim(),
       base_url: formData.base_url.trim(),
       source_type: normalizedSourceType,
       refresh_interval: parsedRefreshInterval,
+      config_json: parsedConfig,
     };
 
     try {
@@ -377,6 +410,24 @@ const Competitors = () => {
                 onChange={(e) => setFormData({ ...formData, refresh_interval: e.target.value })}
               />
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="config_json">Napredna konfiguracija (JSON)</Label>
+              <Textarea
+                id="config_json"
+                rows={8}
+                value={formData.config_json}
+                onChange={(e) => setFormData({ ...formData, config_json: e.target.value })}
+                placeholder={`{"selectors": {"productCard": ".product-card", "name": ".title", "price": ".price"}, "aiEnabled": true}`}
+              />
+              <Alert className="border-muted-foreground/20 bg-muted/50">
+                <Info className="h-4 w-4" />
+                <AlertTitle>Kako koristiti konfiguraciju</AlertTitle>
+                <AlertDescription className="space-y-1 text-sm">
+                  <p>Definišite CSS selektore ili mapiranje CSV/JSON polja kako bi scraper preciznije čitao stranice.</p>
+                  <p className="text-muted-foreground">Polja: selectors (productCard, name, price, regularPrice, ean, brand, category, currency), jsonMap, csvMap, aiEnabled.</p>
+                </AlertDescription>
+              </Alert>
+            </div>
             <div className="flex gap-2 justify-end">
               <Button variant="outline" onClick={() => setDialogOpen(false)}>
                 Otkaži
@@ -413,6 +464,7 @@ const Competitors = () => {
                   <TableHead>Naziv</TableHead>
                   <TableHead>URL</TableHead>
                   <TableHead>Tip Izvora</TableHead>
+                  <TableHead>Konfiguracija</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Akcije</TableHead>
                 </TableRow>
@@ -422,10 +474,19 @@ const Competitors = () => {
                   <TableRow key={competitor.id}>
                     <TableCell className="font-medium">{competitor.name}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {competitor.base_url}
+                      <a href={competitor.base_url} target="_blank" rel="noreferrer" className="hover:underline">
+                        {competitor.base_url}
+                      </a>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline">{competitor.source_type}</Badge>
+                      <Badge variant="outline">{competitor.source_type.toUpperCase()}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      {competitor.config_json ? (
+                        <Badge variant="secondary">Prilagođeno</Badge>
+                      ) : (
+                        <Badge variant="outline">Podrazumijevano</Badge>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge variant={competitor.is_active ? "default" : "secondary"}>
@@ -456,6 +517,45 @@ const Competitors = () => {
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Rezultati posljednjeg scrapinga</CardTitle>
+          <CardDescription>Sažetak vraćen od funkcije scrape-competitors</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {scrapeResults.length === 0 ? (
+            <div className="text-sm text-muted-foreground">Još nije pokrenut scraping u ovoj sesiji.</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Konkurent</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Prikupljeno proizvoda</TableHead>
+                  <TableHead>Greška</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {scrapeResults.map((result) => (
+                  <TableRow key={result.competitor}>
+                    <TableCell className="font-medium">{result.competitor}</TableCell>
+                    <TableCell>
+                      <Badge variant={result.success ? "default" : "destructive"}>
+                        {result.success ? "Uspješno" : "Neuspješno"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{result.productsFound}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground max-w-xs truncate">
+                      {result.error || "-"}
                     </TableCell>
                   </TableRow>
                 ))}

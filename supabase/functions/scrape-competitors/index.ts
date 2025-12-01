@@ -15,6 +15,9 @@ interface Competitor {
   name: string;
   base_url: string;
   source_type: SourceType;
+  config_json?: unknown;
+  scraper_config?: unknown;
+  config?: unknown;
 }
 
 interface ScrapedProduct {
@@ -51,7 +54,8 @@ const COMPETITOR_CONFIGS: Record<string, ScraperConfig> = {};
 
 function getScraperConfig(competitor: Competitor): ScraperConfig | null {
   const inline = (competitor as unknown as { scraper_config?: unknown; config?: unknown }).scraper_config ??
-    (competitor as unknown as { scraper_config?: unknown; config?: unknown }).config;
+    (competitor as unknown as { scraper_config?: unknown; config?: unknown }).config ??
+    competitor.config_json;
 
   if (inline) {
     try {
@@ -229,10 +233,31 @@ async function scrapeCompetitor(competitor: Competitor, config: ScraperConfig | 
     api: scrapeJsonSource,
   };
 
-  const scraper = routers[sourceType] || scrapeHtmlSite;
-  const products = await scraper(competitor, config);
-  console.log(`[SCRAPER] Parsed ${products.length} products for ${competitor.name} using ${sourceType} scraper`);
-  return dedupeProducts(products);
+  const preferredOrder: SourceType[] = [];
+  const addStrategy = (type: SourceType) => {
+    if (!preferredOrder.includes(type)) preferredOrder.push(type);
+  };
+
+  addStrategy(sourceType);
+  if (sourceType !== 'html') addStrategy('html');
+  if (sourceType !== 'json') addStrategy('json');
+  if (sourceType !== 'csv') addStrategy('csv');
+  if (sourceType !== 'pdf') addStrategy('pdf');
+  if (sourceType !== 'image') addStrategy('image');
+
+  const aggregated: ScrapedProduct[] = [];
+
+  for (const strategy of preferredOrder) {
+    const scraper = routers[strategy] || scrapeHtmlSite;
+    console.log(`[SCRAPER] Executing ${strategy} strategy for ${competitor.name}`);
+    const products = await scraper(competitor, config);
+    console.log(`[SCRAPER] ${strategy.toUpperCase()} scraper returned ${products.length} products for ${competitor.name}`);
+    aggregated.push(...products);
+  }
+
+  const deduped = dedupeProducts(aggregated);
+  console.log(`[SCRAPER] After merging strategies, ${competitor.name} has ${deduped.length} unique products`);
+  return deduped;
 }
 
 async function scrapeHtmlSite(competitor: Competitor, config: ScraperConfig | null): Promise<ScrapedProduct[]> {
@@ -244,7 +269,7 @@ async function scrapeHtmlSite(competitor: Competitor, config: ScraperConfig | nu
   const visited = new Set<string>();
   const collected: ParsedCandidate[] = [];
 
-  while (toVisit.size > 0 && visited.size < 5) {
+  while (toVisit.size > 0 && visited.size < 8) {
     const [nextUrl] = Array.from(toVisit);
     toVisit.delete(nextUrl);
     if (visited.has(nextUrl)) continue;
