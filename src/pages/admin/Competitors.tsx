@@ -47,7 +47,7 @@ const Competitors = () => {
   const [formData, setFormData] = useState<{
     name: string;
     base_url: string;
-    source_type: "api" | "csv" | "html" | "json";
+    source_type: "api" | "csv" | "html" | "json" | "pdf";
     refresh_interval: number;
   }>({
     name: "",
@@ -175,7 +175,7 @@ const Competitors = () => {
       setFormData({
         name: competitor.name,
         base_url: competitor.base_url,
-        source_type: competitor.source_type as "api" | "csv" | "html" | "json",
+        source_type: competitor.source_type as "api" | "csv" | "html" | "json" | "pdf",
         refresh_interval: competitor.refresh_interval,
       });
     } else {
@@ -330,7 +330,7 @@ const Competitors = () => {
               <Label htmlFor="source_type">Tip Izvora</Label>
               <Select
                 value={formData.source_type}
-                onValueChange={(value: "api" | "csv" | "html" | "json") => setFormData({ ...formData, source_type: value })}
+                onValueChange={(value: "api" | "csv" | "html" | "json" | "pdf") => setFormData({ ...formData, source_type: value })}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -340,6 +340,7 @@ const Competitors = () => {
                   <SelectItem value="json">JSON</SelectItem>
                   <SelectItem value="api">API</SelectItem>
                   <SelectItem value="csv">CSV</SelectItem>
+                  <SelectItem value="pdf">PDF</SelectItem>
                 </SelectContent>
               </Select>
             </div>
