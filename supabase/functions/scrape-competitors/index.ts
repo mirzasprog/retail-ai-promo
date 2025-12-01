@@ -213,10 +213,12 @@ async function scrapeHtmlSite(competitor: Competitor, firecrawl: any): Promise<P
   console.log(`[SCRAPER] Using HTML scraper for ${competitor.name} with pagination support`);
 
   const crawlResult = await firecrawl.crawlUrl(competitor.base_url, {
-    limit: 500,
+    // Koristimo umjereniji limit da izbjegnemo Firecrawl 402 (Insufficient credits),
+    // ali i dalje pokrivamo više paginacijskih stranica nego prije.
+    limit: 100,
     maxDepth: 3,
     crawlerOptions: {
-      limit: 500,
+      limit: 100,
       maxDepth: 3,
       includePaths: ['/shop', '/shop.*', '/shop/.*'],
       allowExternalLinks: false,
