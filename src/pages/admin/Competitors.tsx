@@ -11,12 +11,15 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Database } from "@/integrations/supabase/types";
+
+type SourceType = Database["public"]["Enums"]["source_type"];
 
 interface Competitor {
   id: string;
   name: string;
   base_url: string;
-  source_type: string;
+  source_type: SourceType;
   is_active: boolean;
   refresh_interval: number;
   created_at: string;
@@ -47,7 +50,7 @@ const Competitors = () => {
   const [formData, setFormData] = useState<{
     name: string;
     base_url: string;
-    source_type: "api" | "csv" | "html" | "json" | "pdf";
+    source_type: SourceType;
     refresh_interval: string;
   }>({
     name: "",
@@ -175,7 +178,7 @@ const Competitors = () => {
       setFormData({
         name: competitor.name,
         base_url: competitor.base_url,
-        source_type: competitor.source_type as "api" | "csv" | "html" | "json" | "pdf",
+        source_type: competitor.source_type,
         refresh_interval: String(competitor.refresh_interval ?? ""),
       });
     } else {
@@ -348,7 +351,7 @@ const Competitors = () => {
               <Label htmlFor="source_type">Tip Izvora</Label>
               <Select
                 value={formData.source_type}
-                onValueChange={(value: "api" | "csv" | "html" | "json" | "pdf") => setFormData({ ...formData, source_type: value })}
+                onValueChange={(value: SourceType) => setFormData({ ...formData, source_type: value })}
               >
                 <SelectTrigger>
                   <SelectValue />
