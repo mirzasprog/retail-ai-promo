@@ -184,21 +184,16 @@ async function scrapeCompetitor(competitor: Competitor, firecrawl: any): Promise
 
   if (sourceType === 'pdf') {
     console.log('[SCRAPER] PDF source detected for competitor', competitor.name);
-    return [];
+    return scrapeRobotPdf(competitor, firecrawl);
   }
 
-  if (sourceType !== 'html') {
+  if (sourceType && sourceType !== 'html') {
     console.log('[SCRAPER] Unknown source_type for competitor', competitor.name, competitor.source_type);
     return [];
   }
 
-  if (!competitor.base_url.includes('robot.ba')) {
-    console.log(`[SCRAPER] Skipping ${competitor.name} because only robot.ba scraping is supported in this version.`);
-    return [];
-  }
-
   try {
-    return await scrapeRobotSite(competitor, firecrawl);
+    return await scrapeHtmlSite(competitor, firecrawl);
   } catch (error) {
     console.error(`[SCRAPER] Error scraping ${competitor.name}:`, error);
     if (error instanceof Error) {
@@ -209,8 +204,8 @@ async function scrapeCompetitor(competitor: Competitor, firecrawl: any): Promise
   }
 }
 
-async function scrapeRobotSite(competitor: Competitor, firecrawl: any): Promise<Product[]> {
-  console.log(`[SCRAPER] Using robot.ba specific scraper for ${competitor.name}`);
+async function scrapeHtmlSite(competitor: Competitor, firecrawl: any): Promise<Product[]> {
+  console.log(`[SCRAPER] Using generic HTML scraper for ${competitor.name}`);
 
   const crawlResult = await firecrawl.crawlUrl(competitor.base_url, {
     limit: 500,
@@ -218,7 +213,6 @@ async function scrapeRobotSite(competitor: Competitor, firecrawl: any): Promise<
     crawlerOptions: {
       limit: 500,
       maxDepth: 3,
-      includePaths: ['/shop', '/shop.*', '/shop/.*'],
       allowExternalLinks: false,
     },
     scrapeOptions: {
@@ -229,15 +223,30 @@ async function scrapeRobotSite(competitor: Competitor, firecrawl: any): Promise<
     },
   });
 
-  console.log(
-    `[SCRAPER] Firecrawl returned ${crawlResult?.data?.length || 0} pages for ${competitor.name}`
-  );
+  const pagesCount = crawlResult?.data?.length || 0;
+  console.log(`[SCRAPER] Firecrawl returned ${pagesCount} pages for ${competitor.name}`);
 
-  if (!crawlResult?.success || !Array.isArray(crawlResult.data)) {
-    const errorMessage = crawlResult?.error || 'Unknown Firecrawl error';
-    console.error(`[SCRAPER] Firecrawl failed for ${competitor.name}: ${errorMessage}`);
-    return [];
+  if (!crawlResult?.success || !Array.isArray(crawlResult.data) || pagesCount === 0) {
+    const errorMessage = crawlResult?.error || 'No crawl data returned';
+    console.warn(`[SCRAPER] Crawl failed or empty for ${competitor.name}: ${errorMessage}. Falling back to single-page scrape.`);
+
+    const scrapeResult = await firecrawl.scrapeUrl(competitor.base_url, {
+      formats: ['html'],
+      onlyMainContent: false,
+      timeout: 45000,
+    });
+
+    if (!scrapeResult?.success || !scrapeResult.html) {
+      console.error(`[SCRAPER] Firecrawl fallback scrape failed for ${competitor.name}: ${scrapeResult?.error || 'Unknown error'}`);
+      return [];
+    }
+
+    return dedupeProducts([
+      ...extractProductsFromJsonLd(scrapeResult.html, competitor.base_url),
+      ...extractProductsFromProductCards(scrapeResult.html, competitor.base_url),
+    ]).slice(0, 150);
   }
+
   const collectedProducts: Product[] = [];
 
   for (const page of crawlResult.data) {
