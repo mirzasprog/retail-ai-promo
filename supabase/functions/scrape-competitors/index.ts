@@ -213,23 +213,31 @@ async function scrapeRobotSite(competitor: Competitor, firecrawl: any): Promise<
   console.log(`[SCRAPER] Using robot.ba specific scraper for ${competitor.name}`);
 
   const crawlResult = await firecrawl.crawlUrl(competitor.base_url, {
-    limit: 15,
-    maxDepth: 2,
+    limit: 500,
+    maxDepth: 3,
+    crawlerOptions: {
+      limit: 500,
+      maxDepth: 3,
+      includePaths: ['/shop', '/shop.*', '/shop/.*'],
+      allowExternalLinks: false,
+    },
     scrapeOptions: {
       formats: ['html'],
       onlyMainContent: false,
       waitFor: 1500,
-      timeout: 45000,
+      timeout: 60000,
     },
   });
+
+  console.log(
+    `[SCRAPER] Firecrawl returned ${crawlResult?.data?.length || 0} pages for ${competitor.name}`
+  );
 
   if (!crawlResult?.success || !Array.isArray(crawlResult.data)) {
     const errorMessage = crawlResult?.error || 'Unknown Firecrawl error';
     console.error(`[SCRAPER] Firecrawl failed for ${competitor.name}: ${errorMessage}`);
     return [];
   }
-
-  console.log(`[SCRAPER] Firecrawl returned ${crawlResult.data.length} pages for ${competitor.name}`);
   const collectedProducts: Product[] = [];
 
   for (const page of crawlResult.data) {
