@@ -213,10 +213,12 @@ const Competitors = () => {
       return;
     }
 
+    const normalizedSourceType = (formData.source_type || "html").toLowerCase() as SourceType;
+
     const payload = {
       name: formData.name.trim(),
       base_url: formData.base_url.trim(),
-      source_type: formData.source_type,
+      source_type: normalizedSourceType,
       refresh_interval: parsedRefreshInterval,
     };
 

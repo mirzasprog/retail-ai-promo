@@ -6,11 +6,13 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+type SourceType = 'api' | 'html' | 'csv' | 'json' | 'pdf';
+
 interface Competitor {
   id: string;
   name: string;
   base_url: string;
-  source_type: string;
+  source_type: SourceType;
 }
 
 interface Product {
@@ -178,20 +180,24 @@ Deno.serve(async (req) => {
 async function scrapeCompetitor(competitor: Competitor, firecrawl: any): Promise<Product[]> {
   console.log(`[SCRAPER] Starting scrape for ${competitor.name} at ${competitor.base_url}`);
 
+  const sourceType = competitor.source_type?.toLowerCase() as SourceType;
+
+  if (sourceType === 'pdf') {
+    console.log('[SCRAPER] PDF source detected for competitor', competitor.name);
+    return [];
+  }
+
+  if (sourceType !== 'html') {
+    console.log('[SCRAPER] Unknown source_type for competitor', competitor.name, competitor.source_type);
+    return [];
+  }
+
   if (!competitor.base_url.includes('robot.ba')) {
     console.log(`[SCRAPER] Skipping ${competitor.name} because only robot.ba scraping is supported in this version.`);
     return [];
   }
 
   try {
-    const isPdfSource =
-      competitor.source_type?.toLowerCase() === 'pdf' ||
-      competitor.base_url.toLowerCase().endsWith('.pdf');
-
-    if (isPdfSource) {
-      return await scrapeRobotPdf(competitor, firecrawl);
-    }
-
     return await scrapeRobotSite(competitor, firecrawl);
   } catch (error) {
     console.error(`[SCRAPER] Error scraping ${competitor.name}:`, error);
