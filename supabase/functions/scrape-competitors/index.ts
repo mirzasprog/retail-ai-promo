@@ -184,6 +184,10 @@ async function scrapeCompetitor(competitor: Competitor, firecrawl: any): Promise
   }
 
   try {
+    if (competitor.base_url.toLowerCase().endsWith('.pdf')) {
+      return await scrapeRobotPdf(competitor, firecrawl);
+    }
+
     return await scrapeRobotSite(competitor, firecrawl);
   } catch (error) {
     console.error(`[SCRAPER] Error scraping ${competitor.name}:`, error);
@@ -236,6 +240,34 @@ async function scrapeRobotSite(competitor: Competitor, firecrawl: any): Promise<
   console.log(`[SCRAPER] Parsed ${deduped.length} unique products for ${competitor.name}`);
 
   return deduped.slice(0, 150);
+}
+
+async function scrapeRobotPdf(competitor: Competitor, firecrawl: any): Promise<Product[]> {
+  console.log(`[SCRAPER] Using robot.ba PDF scraper for ${competitor.name}`);
+
+  const scrapeResult = await firecrawl.scrapeUrl(competitor.base_url, {
+    formats: ['markdown', 'text'],
+    onlyMainContent: false,
+    timeout: 45000,
+  });
+
+  if (!scrapeResult?.success) {
+    const errorMessage = scrapeResult?.error || 'Unknown Firecrawl error';
+    console.error(`[SCRAPER] Firecrawl PDF scrape failed for ${competitor.name}: ${errorMessage}`);
+    return [];
+  }
+
+  const content = (scrapeResult.markdown || scrapeResult.text || '') as string;
+
+  if (!content.trim()) {
+    console.log(`[SCRAPER] No content returned from PDF for ${competitor.name}`);
+    return [];
+  }
+
+  const products = parseProductsFromPdfText(content, competitor.base_url);
+  console.log(`[SCRAPER] Parsed ${products.length} products from PDF for ${competitor.name}`);
+
+  return dedupeProducts(products).slice(0, 150);
 }
 
 function extractProductsFromJsonLd(html: string, sourceUrl: string): Product[] {
@@ -369,6 +401,44 @@ function extractBrand(html: string): string | null {
     }
   }
   return null;
+}
+
+function parseProductsFromPdfText(content: string, sourceUrl: string): Product[] {
+  const lines = content.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const products: Product[] = [];
+  const priceRegex = /(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})/g;
+  let pendingNameParts: string[] = [];
+
+  for (const line of lines) {
+    const priceMatches = Array.from(line.matchAll(priceRegex)).map(match => normalizePrice(match[1])).filter(price => !isNaN(price));
+
+    if (priceMatches.length === 0) {
+      if (pendingNameParts.length < 2) {
+        pendingNameParts.push(line);
+      } else {
+        pendingNameParts = [pendingNameParts[1], line];
+      }
+      continue;
+    }
+
+    const candidateName = [...pendingNameParts, line].join(' ')
+      .replace(priceRegex, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+    pendingNameParts = [];
+
+    if (candidateName && priceMatches.length > 0) {
+      products.push({
+        name: candidateName.slice(0, 250),
+        promoPrice: Math.min(...priceMatches),
+        regularPrice: priceMatches.length > 1 ? Math.max(...priceMatches) : undefined,
+      });
+    }
+  }
+
+  console.log(`[EXTRACTOR] Found ${products.length} products in PDF from ${sourceUrl}`);
+  return products;
 }
 
 function dedupeProducts(products: Product[]): Product[] {
