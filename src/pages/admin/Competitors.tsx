@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ArrowLeft, Download, RefreshCw, Plus, Edit, Trash2 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
@@ -56,12 +56,7 @@ const Competitors = () => {
     refresh_interval: 3600,
   });
 
-  useEffect(() => {
-    loadCompetitors();
-    loadRecentPrices();
-  }, []);
-
-  const loadCompetitors = async () => {
+  const loadCompetitors = useCallback(async () => {
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -81,9 +76,9 @@ const Competitors = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
 
-  const loadRecentPrices = async () => {
+  const loadRecentPrices = useCallback(async () => {
     setRecentLoading(true);
     try {
       const { data, error } = await supabase
@@ -107,7 +102,12 @@ const Competitors = () => {
     } finally {
       setRecentLoading(false);
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    loadCompetitors();
+    loadRecentPrices();
+  }, [loadCompetitors, loadRecentPrices]);
 
   const handleScrape = async () => {
     setScraping(true);
@@ -232,7 +232,7 @@ const Competitors = () => {
       console.error('Error saving competitor:', error);
       toast({
         title: "Greška",
-        description: "Nije moguće sačuvati konkurenta",
+        description: error instanceof Error ? error.message : "Nije moguće sačuvati konkurenta",
         variant: "destructive",
       });
     }
