@@ -139,7 +139,7 @@ const Competitors = () => {
       console.error('Error scraping competitors:', error);
       toast({
         title: "Greška pri scraping-u konkurenata",
-        description: "Provjerite API ključ i URL-ove konkurenata.",
+        description: "Provjerite konfiguraciju izvora i URL-ove konkurenata.",
         variant: "destructive",
       });
     } finally {
@@ -364,6 +364,7 @@ const Competitors = () => {
                   <SelectItem value="api">API</SelectItem>
                   <SelectItem value="csv">CSV</SelectItem>
                   <SelectItem value="pdf">PDF</SelectItem>
+                  <SelectItem value="image">Slika (OCR)</SelectItem>
                 </SelectContent>
               </Select>
             </div>

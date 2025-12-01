@@ -99,6 +99,7 @@ export type Database = {
         Row: {
           brand: string | null
           category: string | null
+          currency: string | null
           competitor_id: string
           fetched_at: string | null
           id: string
@@ -113,6 +114,7 @@ export type Database = {
         Insert: {
           brand?: string | null
           category?: string | null
+          currency?: string | null
           competitor_id: string
           fetched_at?: string | null
           id?: string
@@ -127,6 +129,7 @@ export type Database = {
         Update: {
           brand?: string | null
           category?: string | null
+          currency?: string | null
           competitor_id?: string
           fetched_at?: string | null
           id?: string
@@ -457,7 +460,7 @@ export type Database = {
     Enums: {
       app_role: "admin" | "category_manager" | "viewer"
       campaign_status: "draft" | "active" | "completed" | "cancelled"
-      source_type: "api" | "html" | "csv" | "json" | "pdf"
+      source_type: "api" | "html" | "csv" | "json" | "pdf" | "image"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -587,7 +590,7 @@ export const Constants = {
     Enums: {
       app_role: ["admin", "category_manager", "viewer"],
       campaign_status: ["draft", "active", "completed", "cancelled"],
-      source_type: ["api", "html", "csv", "json", "pdf"],
+      source_type: ["api", "html", "csv", "json", "pdf", "image"],
     },
   },
 } as const
