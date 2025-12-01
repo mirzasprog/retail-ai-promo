@@ -50,7 +50,17 @@ interface ScraperConfig {
 
 type ParsedCandidate = { product: ScrapedProduct; rawBlock?: string };
 
-const COMPETITOR_CONFIGS: Record<string, ScraperConfig> = {};
+const COMPETITOR_CONFIGS: Record<string, ScraperConfig> = {
+  Bingo: {
+    selectors: {
+      productCard: 'li.product, article.product',
+      name: '.woocommerce-loop-product__title',
+      price: '.price ins .woocommerce-Price-amount, .price .woocommerce-Price-amount',
+      regularPrice: '.price del .woocommerce-Price-amount, .price del .amount',
+      currency: '.woocommerce-Price-currencySymbol',
+    },
+  },
+};
 
 function getScraperConfig(competitor: Competitor): ScraperConfig | null {
   const inline = (competitor as unknown as { scraper_config?: unknown; config?: unknown }).scraper_config ??
@@ -271,7 +281,18 @@ async function scrapeHtmlSite(competitor: Competitor, config: ScraperConfig | nu
   const visited = new Set<string>();
   const collected: ParsedCandidate[] = [];
 
-  while (toVisit.size > 0 && visited.size < 8) {
+  const wooProducts = await scrapeWooCommerceStore(competitor.base_url, config);
+  if (wooProducts.length > 0) {
+    console.log(`[SCRAPER][HTML] WooCommerce API prefetch yielded ${wooProducts.length} products for ${competitor.name}`);
+    wooProducts.slice(0, 5).forEach((p, idx) =>
+      console.log(`[SCRAPER][HTML] Woo sample ${idx + 1}: ${p.name} -> ${p.promoPrice}`)
+    );
+    collected.push(...wooProducts.map((product) => ({ product, rawBlock: undefined })));
+  } else {
+    console.log('[SCRAPER][HTML] WooCommerce API returned no products, continuing with DOM crawl');
+  }
+
+  while (toVisit.size > 0 && visited.size < 20) {
     const [nextUrl] = Array.from(toVisit);
     toVisit.delete(nextUrl);
     if (visited.has(nextUrl)) continue;
@@ -283,12 +304,26 @@ async function scrapeHtmlSite(competitor: Competitor, config: ScraperConfig | nu
       if (!html) continue;
 
       const domProducts = extractProductsFromDom(html, nextUrl, config);
+      console.log(`[SCRAPER][HTML] DOM extraction found ${domProducts.length} candidates on ${nextUrl}`);
       const jsonProducts = extractProductsFromJsonLd(html, nextUrl).map((product) => ({ product, rawBlock: undefined }));
+      console.log(`[SCRAPER][HTML] JSON-LD extraction found ${jsonProducts.length} candidates on ${nextUrl}`);
       const cardProducts = extractProductsFromProductCards(html, nextUrl, config);
+      console.log(`[SCRAPER][HTML] Card extraction found ${cardProducts.length} candidates on ${nextUrl}`);
       collected.push(...domProducts, ...jsonProducts, ...cardProducts);
 
+      if (collected.length === 0 && visited.size === 1) {
+        console.log(`[SCRAPER][HTML] No candidates yet after first page ${nextUrl}`);
+      }
+
+      const paginationLinks = extractPaginationLinks(html, origin, nextUrl);
+      for (const link of paginationLinks) {
+        if (!visited.has(link) && toVisit.size < 100) {
+          toVisit.add(link);
+        }
+      }
+
       for (const link of extractLinks(html, origin)) {
-        if (!visited.has(link) && toVisit.size < 15) {
+        if (!visited.has(link) && toVisit.size < 100) {
           toVisit.add(link);
         }
       }
@@ -298,6 +333,7 @@ async function scrapeHtmlSite(competitor: Competitor, config: ScraperConfig | nu
   }
 
   console.log(`[SCRAPER] HTML scraper visited ${visited.size} pages for ${competitor.name}`);
+  console.log(`[SCRAPER] HTML scraper collected ${collected.length} raw candidates before normalization for ${competitor.name}`);
   return await finalizeCandidates(collected, config, 'html');
 }
 
@@ -321,7 +357,7 @@ async function scrapePdfSource(competitor: Competitor, config: ScraperConfig | n
     return await finalizeCandidates(pageBlocks, config, 'pdf');
   } catch (error) {
     console.error(`[SCRAPER] PDF extraction failed for ${competitor.name}:`, error);
-    return [];
+    throw error instanceof Error ? error : new Error('Unknown PDF scraping error');
   }
 }
 
@@ -502,13 +538,14 @@ function extractProductsFromJsonLd(html: string, sourceUrl: string): ScrapedProd
         const normalizedOffers = offers as Offer[];
         const promo = normalizedOffers.find((offer) => offer.price !== undefined);
 
-          if (graphNode.name && promo?.price) {
-            const priceValue = normalizePrice(promo.price);
+          const offerPrice = promo?.price ?? promo?.priceSpecification?.price;
+          if (graphNode.name && offerPrice !== undefined) {
+            const priceValue = normalizePrice(offerPrice);
             if (!isNaN(priceValue)) {
               products.push({
                 name: String(graphNode.name).trim().slice(0, 250),
                 promoPrice: priceValue,
-                regularPrice: promo.priceSpecification?.price || null,
+                regularPrice: promo.priceSpecification?.price ? normalizePrice(promo.priceSpecification.price) : null,
                 brand: graphNode.brand?.name || null,
                 ean: graphNode.gtin13 || graphNode.gtin || null,
                 category: graphNode.category || null,
@@ -532,20 +569,33 @@ function extractProductsFromJsonLd(html: string, sourceUrl: string): ScrapedProd
 function extractProductsFromDom(html: string, sourceUrl: string, config: ScraperConfig | null): ParsedCandidate[] {
   const $ = loadHtml(html);
   const selectors = config?.selectors || {};
-  const productSelector = selectors.productCard || 'article, .product, .product-card, .item';
+  const productSelector = selectors.productCard || 'li.product, article, .product, .product-card, .item';
   const products: ParsedCandidate[] = [];
 
   $(productSelector).each((_, element) => {
     const rawBlock = $(element).html() || '';
     const name = selectors.name
       ? $(element).find(selectors.name).text()
-      : $(element).find('h1,h2,h3,h4,h5,h6,.product-name,.title,[itemprop="name"]').text();
+      : $(element)
+          .find(
+            '.woocommerce-loop-product__title,h1,h2,h3,h4,h5,h6,.product-name,.title,[itemprop="name"],.product_title'
+          )
+          .text();
+
     const promoPriceText = selectors.price
       ? $(element).find(selectors.price).text()
-      : $(element).find('.price,.promo-price,[itemprop="price"]').first().text();
+      : $(element)
+          .find(
+            '.price ins .woocommerce-Price-amount, .price .woocommerce-Price-amount, .price,.promo-price,[itemprop="price"]'
+          )
+          .first()
+          .text();
     const regularPriceText = selectors.regularPrice
       ? $(element).find(selectors.regularPrice).text()
-      : $(element).find('.regular-price,.old-price,.compare-at-price').first().text();
+      : $(element)
+          .find('.price del .woocommerce-Price-amount, .regular-price,.old-price,.compare-at-price, del .amount')
+          .first()
+          .text();
     const ean = selectors.ean
       ? $(element).find(selectors.ean).text() || $(element).attr('data-ean')
       : $(element).attr('data-ean') || $(element).find('[itemprop="gtin13"],[itemprop="sku"]').text();
@@ -559,8 +609,9 @@ function extractProductsFromDom(html: string, sourceUrl: string, config: Scraper
       ? $(element).find(selectors.currency).text()
       : $(element).find('[itemprop="priceCurrency"]').attr('content') || extractCurrency(promoPriceText || regularPriceText);
 
-    const promoPrice = normalizePrice(promoPriceText || '');
-    const regularPrice = normalizePrice(regularPriceText || '');
+    const promoPrice = normalizePrice(pickPriceFromText(promoPriceText || '', true));
+    const regularPriceCandidate = regularPriceText || pickPriceFromText(promoPriceText || '', false);
+    const regularPrice = normalizePrice(regularPriceCandidate || '');
 
     if (name && !isNaN(promoPrice)) {
       products.push({
@@ -591,17 +642,19 @@ function extractProductsFromProductCards(html: string, sourceUrl: string, config
   const products: ParsedCandidate[] = [];
 
   const productBlocks = Array.from(html.matchAll(/<article[\s\S]*?<\/article>/gi));
+  const listBlocks = Array.from(html.matchAll(/<li[^>]+class="[^"]*product[^"]*"[^>]*>[\s\S]*?<\/li>/gi));
   const fallbackBlocks = Array.from(html.matchAll(/<div[^>]+class="[^"]*(?:product|item|card)[^"]*"[^>]*>[\s\S]*?<\/div>/gi));
-  const blocks = productBlocks.length > 0 ? productBlocks : fallbackBlocks;
+  const blocks = productBlocks.length > 0 ? productBlocks : listBlocks.length > 0 ? listBlocks : fallbackBlocks;
 
   for (const block of blocks) {
     const snippet = block[0];
     const nameMatch =
       snippet.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i) ||
-      snippet.match(/class=["'][^"']*(?:title|name|product-name)[^"']*["'][^>]*>([\s\S]*?)<\//i) ||
-      snippet.match(/alt=["']([^"']+)["']/i);
+      snippet.match(/class=["'][^"']*(?:woocommerce-loop-product__title|title|name|product-name)[^"']*["'][^>]*>([\s\S]*?)<\//i) ||
+      snippet.match(/alt=["']([^"']+)["']/i) ||
+      snippet.match(/data-product_title=["']([^"']+)["']/i);
 
-    const priceMatches = snippet.match(/([A-Z]{3}|€|KM|BAM)?\s?(\d+[.,]\d{2})/gi);
+    const priceMatches = snippet.match(/(?:[A-Z]{3}|€|KM|BAM)?\s?\d+(?:[.,]\d{1,2})?/gi);
 
     if (nameMatch && priceMatches?.length) {
       const cleanedName = nameMatch[1].replace(/<[^>]+>/g, '').replace(/&[^;]+;/g, ' ').trim();
@@ -782,6 +835,12 @@ function normalizePrice(raw: string | number | null | undefined): number {
   return parseFloat(cleaned);
 }
 
+function pickPriceFromText(raw: string, takeLast = false): string {
+  const matches = raw.match(/\d+[.,]\d{1,2}|\d+/g);
+  if (!matches || matches.length === 0) return raw;
+  return takeLast ? matches[matches.length - 1] : matches[0];
+}
+
 function extractCurrency(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const currencyMatch = String(raw).match(/(BAM|KM|EUR|€|USD|GBP)/i);
@@ -918,6 +977,9 @@ async function finalizeCandidates(
   }
 
   console.log(`[SCRAPER][${scraper}] Finalized ${normalized.length} normalized products`);
+  normalized.slice(0, 5).forEach((p, idx) =>
+    console.log(`[SCRAPER][${scraper}] Sample ${idx + 1}: ${p.name} | promo=${p.promoPrice} | regular=${p.regularPrice}`)
+  );
   return normalized;
 }
 
@@ -1025,11 +1087,32 @@ async function fetchArrayBuffer(url: string): Promise<ArrayBuffer | null> {
   });
 
   if (!response.ok) {
-    console.warn(`[SCRAPER] Binary request failed for ${url} with status ${response.status}`);
-    return null;
+    const message = `[SCRAPER] Binary request failed for ${url} with status ${response.status}`;
+    console.warn(message);
+    throw new Error(message);
   }
 
   return response.arrayBuffer();
+}
+
+function extractPaginationLinks(html: string, origin: string, currentUrl: string): string[] {
+  const $ = loadHtml(html);
+  const links = new Set<string>();
+
+  $('a.page-numbers[href], a[rel="next"], link[rel="next"]').each((_, el) => {
+    const href = $(el).attr('href');
+    if (!href) return;
+    try {
+      const absolute = new URL(href, currentUrl).toString();
+      if (absolute.startsWith(origin)) {
+        links.add(absolute);
+      }
+    } catch (_err) {
+      return;
+    }
+  });
+
+  return Array.from(links);
 }
 
 function extractLinks(html: string, origin: string): string[] {
