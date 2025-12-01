@@ -70,7 +70,7 @@ Deno.serve(async (req) => {
     for (const competitor of (competitors as Competitor[])) {
       console.log(`[SCRAPER] ===== Processing competitor: ${competitor.name} =====`);
       console.log(`[SCRAPER] URL: ${competitor.base_url}`);
-      
+
       try {
         // Use competitor-specific scraper
         const products = await scrapeCompetitor(competitor, firecrawl);
@@ -177,55 +177,14 @@ Deno.serve(async (req) => {
  */
 async function scrapeCompetitor(competitor: Competitor, firecrawl: any): Promise<Product[]> {
   console.log(`[SCRAPER] Starting scrape for ${competitor.name} at ${competitor.base_url}`);
-  
+
+  if (!competitor.base_url.includes('robot.ba')) {
+    console.log(`[SCRAPER] Skipping ${competitor.name} because only robot.ba scraping is supported in this version.`);
+    return [];
+  }
+
   try {
-    // Use Firecrawl to extract structured data with better options
-    console.log(`[SCRAPER] Calling Firecrawl for ${competitor.name}...`);
-    const scrapeResult = await firecrawl.scrapeUrl(competitor.base_url, {
-      formats: ['markdown', 'html'],
-      onlyMainContent: true,
-      waitFor: 2000, // Wait for dynamic content
-      timeout: 30000, // 30 second timeout
-    });
-
-    if (!scrapeResult.success) {
-      console.error(`[SCRAPER] Firecrawl failed for ${competitor.name}: ${scrapeResult.error || 'Unknown error'}`);
-      return [];
-    }
-
-    console.log(`[SCRAPER] Successfully fetched content for ${competitor.name}, extracting products...`);
-    if (scrapeResult.markdown) {
-      console.log(`[SCRAPER] Sample markdown for ${competitor.name}:`, scrapeResult.markdown.slice(0, 800));
-    }
-    if (scrapeResult.html) {
-      console.log(`[SCRAPER] Sample HTML for ${competitor.name}:`, scrapeResult.html.slice(0, 800));
-    }
-
-    // Try to extract products using multiple strategies
-    let products: Product[] = [];
-    
-    // Strategy 1: Look for price patterns in markdown
-    if (scrapeResult.markdown) {
-      products = extractFromMarkdown(scrapeResult.markdown, competitor.name);
-    }
-
-    // Strategy 2: If markdown extraction failed, try HTML
-    if (products.length === 0 && scrapeResult.html) {
-      products = extractFromHTML(scrapeResult.html, competitor.name);
-    }
-
-    console.log(`[SCRAPER] Extracted ${products.length} products from ${competitor.name}`);
-
-    if (products.length === 0 && (scrapeResult.markdown || scrapeResult.html)) {
-      console.log(`[SCRAPER] No products parsed for ${competitor.name}, adding fallback demo product.`);
-      products.push({
-        name: `Test proizvod - ${competitor.name}`,
-        promoPrice: 1.99,
-        regularPrice: 2.49,
-      });
-    }
-
-    return products;
+    return await scrapeRobotSite(competitor, firecrawl);
   } catch (error) {
     console.error(`[SCRAPER] Error scraping ${competitor.name}:`, error);
     if (error instanceof Error) {
@@ -236,126 +195,199 @@ async function scrapeCompetitor(competitor: Competitor, firecrawl: any): Promise
   }
 }
 
-/**
- * Extract products from markdown content
- */
-function extractFromMarkdown(markdown: string, competitorName: string): Product[] {
+async function scrapeRobotSite(competitor: Competitor, firecrawl: any): Promise<Product[]> {
+  console.log(`[SCRAPER] Using robot.ba specific scraper for ${competitor.name}`);
+
+  const crawlResult = await firecrawl.crawlUrl(competitor.base_url, {
+    limit: 15,
+    maxDepth: 2,
+    scrapeOptions: {
+      formats: ['html'],
+      onlyMainContent: false,
+      waitFor: 1500,
+      timeout: 45000,
+    },
+  });
+
+  if (!crawlResult?.success || !Array.isArray(crawlResult.data)) {
+    const errorMessage = crawlResult?.error || 'Unknown Firecrawl error';
+    console.error(`[SCRAPER] Firecrawl failed for ${competitor.name}: ${errorMessage}`);
+    return [];
+  }
+
+  console.log(`[SCRAPER] Firecrawl returned ${crawlResult.data.length} pages for ${competitor.name}`);
+  const collectedProducts: Product[] = [];
+
+  for (const page of crawlResult.data) {
+    const pageUrl = page.url || competitor.base_url;
+    const html = page.html as string | undefined;
+
+    if (!html) {
+      continue;
+    }
+
+    const jsonProducts = extractProductsFromJsonLd(html, pageUrl);
+    const cardProducts = extractProductsFromProductCards(html, pageUrl);
+
+    collectedProducts.push(...jsonProducts, ...cardProducts);
+  }
+
+  const deduped = dedupeProducts(collectedProducts);
+  console.log(`[SCRAPER] Parsed ${deduped.length} unique products for ${competitor.name}`);
+
+  return deduped.slice(0, 150);
+}
+
+function extractProductsFromJsonLd(html: string, sourceUrl: string): Product[] {
+  const scripts = Array.from(html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi));
   const products: Product[] = [];
-  const lines = markdown.split('\n');
 
-  console.log(`[EXTRACTOR] Processing ${lines.length} lines of markdown from ${competitorName}`);
+  for (const script of scripts) {
+    try {
+      const parsed = JSON.parse(script[1].trim());
+      const nodes = Array.isArray(parsed) ? parsed : [parsed];
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
+      for (const node of nodes) {
+        if (!node) continue;
 
-    // Look for price patterns: "12.99 KM", "12,99 BAM", "€12.99"
-    const priceMatches = line.match(/(\d+[.,]\d{2})\s*(?:KM|BAM|€|EUR)?/gi);
-
-    if (priceMatches && priceMatches.length > 0) {
-      // Try to find product name in previous lines
-      let productName = '';
-      for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
-        const prevLine = lines[j].replace(/[#*\[\]]/g, '').trim();
-        if (prevLine && prevLine.length > 2 && prevLine.length < 250 && !prevLine.match(/\d+[.,]\d{2}/)) {
-          productName = prevLine;
-          break;
+        if (Array.isArray(node['@graph'])) {
+          for (const graphNode of node['@graph']) {
+            const graphProducts = convertJsonLdNodeToProducts(graphNode, sourceUrl);
+            products.push(...graphProducts);
+          }
+        } else {
+          const nodeProducts = convertJsonLdNodeToProducts(node, sourceUrl);
+          products.push(...nodeProducts);
         }
       }
+    } catch (parseError) {
+      console.log('[EXTRACTOR] Unable to parse JSON-LD block:', parseError);
+    }
+  }
 
-      if (!productName) {
-        // Try to derive from current line by stripping prices
-        const cleaned = line.replace(/\d+[.,]\d{2}\s*(?:KM|BAM|€|EUR)?/gi, '').replace(/[-•|]/g, ' ').trim();
-        if (cleaned.length > 2) {
-          productName = cleaned.slice(0, 250);
-        }
-      }
+  return products;
+}
 
-      if (productName) {
-        const prices = priceMatches.map(p => parseFloat(p.replace(/[^\d.,]/g, '').replace(',', '.')));
+function convertJsonLdNodeToProducts(node: any, sourceUrl: string): Product[] {
+  const products: Product[] = [];
 
+  if (!node || typeof node !== 'object') {
+    return products;
+  }
+
+  const type = Array.isArray(node['@type']) ? node['@type'] : [node['@type']];
+  if (!type.includes('Product')) {
+    return products;
+  }
+
+  const offers = Array.isArray(node.offers) ? node.offers : node.offers ? [node.offers] : [];
+  const promo = offers.find((offer: any) => offer.price);
+
+  if (node.name && promo?.price) {
+    const priceValue = normalizePrice(promo.price);
+
+    if (!isNaN(priceValue)) {
+      products.push({
+        name: String(node.name).trim().slice(0, 250),
+        promoPrice: priceValue,
+        regularPrice: promo.priceSpecification?.price || undefined,
+        brand: node.brand?.name || undefined,
+        ean: node.gtin13 || node.gtin || undefined,
+        category: node.category || undefined,
+        promoStartDate: promo.priceValidFrom || undefined,
+        promoEndDate: promo.priceValidUntil || undefined,
+      });
+    }
+  }
+
+  return products;
+}
+
+function extractProductsFromProductCards(html: string, sourceUrl: string): Product[] {
+  const products: Product[] = [];
+
+  const productBlocks = Array.from(html.matchAll(/<article[\s\S]*?<\/article>/gi));
+  const fallbackBlocks = Array.from(html.matchAll(/<div[^>]+class="[^"]*(?:product|item|card)[^"]*"[^>]*>[\s\S]*?<\/div>/gi));
+
+  const blocks = productBlocks.length > 0 ? productBlocks : fallbackBlocks;
+
+  for (const block of blocks) {
+    const snippet = block[0];
+    const nameMatch = snippet.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i) ||
+      snippet.match(/class=["'][^"']*(?:title|name|product-name)[^"']*["'][^>]*>([\s\S]*?)<\//i) ||
+      snippet.match(/alt=["']([^"']+)["']/i);
+
+    const priceMatches = snippet.match(/(\d+[.,]\d{2})\s*(?:KM|BAM|€|EUR)?/gi);
+
+    if (nameMatch && priceMatches?.length) {
+      const cleanedName = nameMatch[1].replace(/<[^>]+>/g, '').replace(/&[^;]+;/g, ' ').trim();
+      const prices = priceMatches.map(p => normalizePrice(p)).filter(p => !isNaN(p));
+
+      if (cleanedName && prices.length > 0) {
         products.push({
-          name: productName,
+          name: cleanedName.slice(0, 250),
           promoPrice: Math.min(...prices),
           regularPrice: prices.length > 1 ? Math.max(...prices) : undefined,
+          category: extractCategory(snippet) || undefined,
+          brand: extractBrand(snippet) || undefined,
         });
       }
     }
   }
 
-  console.log(`[EXTRACTOR] Found ${products.length} products in markdown from ${competitorName}`);
-  return products.slice(0, 50); // Limit to 50 products
-}
-
-/**
- * Extract products from HTML content
- */
-function extractFromHTML(html: string, competitorName: string): Product[] {
-  const products: Product[] = [];
-
-  console.log(`[EXTRACTOR] Processing HTML from ${competitorName}`);
-
-  // Look for common product container patterns
-  const productPatterns = [
-    /<article[^>]*class="[^"]*product[^"]*"[^>]*>(.*?)<\/article>/gis,
-    /<div[^>]*class="[^"]*product[^"]*"[^>]*>(.*?)<\/div>/gis,
-    /<li[^>]*class="[^"]*product[^"]*"[^>]*>(.*?)<\/li>/gis,
-    /<div[^>]*class="[^"]*(?:item|card)[^"]*"[^>]*>(.*?)<\/div>/gis,
-  ];
-  
-  for (const pattern of productPatterns) {
-    let match;
-    while ((match = pattern.exec(html)) !== null && products.length < 50) {
-      const productHtml = match[1];
-      
-      // Extract product name
-      const nameMatch = productHtml.match(/<h[1-6][^>]*>(.*?)<\/h[1-6]>/i) ||
-                       productHtml.match(/<[^>]*class="[^"]*(?:title|name|product-name)[^"]*"[^>]*>(.*?)<\//i) ||
-                       productHtml.match(/alt="([^"]+)"/i);
-
-      // Extract prices
-      const priceMatches = productHtml.match(/(\d+[.,]\d{2})\s*(?:KM|BAM|€|EUR)?/gi);
-      
-      if (nameMatch && priceMatches && priceMatches.length > 0) {
-        const name = nameMatch[1].replace(/<[^>]+>/g, '').trim();
-        const prices = priceMatches.map(p => parseFloat(p.replace(',', '.')));
-        
-        if (name && name.length > 2 && name.length < 250) {
-          products.push({
-            name: name,
-            promoPrice: Math.min(...prices),
-            regularPrice: prices.length > 1 ? Math.max(...prices) : undefined,
-          });
-        }
-      }
-    }
-
-    if (products.length > 0) {
-      break; // Found products with this pattern, no need to try others
+  // Fallback for data attributes when markup is minimal
+  const dataAttributeMatches = Array.from(html.matchAll(/data-product-name=["']([^"']+)["'][^>]*data-price=["']([^"']+)["']/gi));
+  for (const match of dataAttributeMatches) {
+    const name = match[1];
+    const price = normalizePrice(match[2]);
+    if (name && !isNaN(price)) {
+      products.push({ name: name.trim().slice(0, 250), promoPrice: price });
     }
   }
 
-  // Fallback: scan for any price tags and use surrounding text as name
-  if (products.length === 0) {
-    const genericPricePattern = /<[^>]*>([^<]*?(\d+[.,]\d{2})\s*(?:KM|BAM|€|EUR)?[^<]*?)<\/[^>]*>/gi;
-    let match;
-    while ((match = genericPricePattern.exec(html)) !== null && products.length < 20) {
-      const snippet = match[1].replace(/\s+/g, ' ').trim();
-      if (snippet.length > 5) {
-        const cleanedName = snippet.replace(/(\d+[.,]\d{2}\s*(?:KM|BAM|€|EUR)?)/gi, '').trim();
-        const prices = (snippet.match(/(\d+[.,]\d{2})/g) || []).map(p => parseFloat(p.replace(',', '.')));
-        if (cleanedName && prices.length > 0) {
-          products.push({
-            name: cleanedName.slice(0, 250),
-            promoPrice: Math.min(...prices),
-            regularPrice: prices.length > 1 ? Math.max(...prices) : undefined,
-          });
-        }
-      }
+  console.log(`[EXTRACTOR] Found ${products.length} products in HTML from ${sourceUrl}`);
+  return products;
+}
+
+function extractCategory(html: string): string | null {
+  const breadcrumbMatch = html.match(/class=["'][^"']*(?:breadcrumb|category)[^"']*["'][^>]*>([\s\S]*?)<\//i);
+  if (breadcrumbMatch) {
+    const text = breadcrumbMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (text) {
+      return text;
+    }
+  }
+  return null;
+}
+
+function extractBrand(html: string): string | null {
+  const brandMatch = html.match(/data-brand=["']([^"']+)["']/i) || html.match(/class=["'][^"']*brand[^"']*["'][^>]*>([\s\S]*?)<\//i);
+  if (brandMatch) {
+    const text = brandMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (text) {
+      return text;
+    }
+  }
+  return null;
+}
+
+function dedupeProducts(products: Product[]): Product[] {
+  const seen = new Map<string, Product>();
+
+  for (const product of products) {
+    const key = product.name.toLowerCase();
+    if (!seen.has(key)) {
+      seen.set(key, product);
     }
   }
 
-  console.log(`[EXTRACTOR] Found ${products.length} products in HTML from ${competitorName}`);
-  return products.slice(0, 50);
+  return Array.from(seen.values());
 }
 
-// Remove old extraction functions - they're replaced by extractFromMarkdown and extractFromHTML above
+function normalizePrice(raw: string | number): number {
+  if (typeof raw === 'number') {
+    return raw;
+  }
+
+  return parseFloat(raw.replace(/[^\d.,-]/g, '').replace(',', '.'));
+}
