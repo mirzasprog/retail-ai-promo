@@ -212,24 +212,62 @@ async function scrapeCompetitor(competitor: Competitor, firecrawl: any): Promise
 async function scrapeHtmlSite(competitor: Competitor, firecrawl: any): Promise<Product[]> {
   console.log(`[SCRAPER] Using HTML scraper for ${competitor.name} with pagination support`);
 
-  const crawlResult = await firecrawl.crawlUrl(competitor.base_url, {
-    // Koristimo umjereniji limit da izbjegnemo Firecrawl 402 (Insufficient credits),
-    // ali i dalje pokrivamo više paginacijskih stranica nego prije.
-    limit: 100,
-    maxDepth: 3,
-    crawlerOptions: {
+  let crawlResult: any;
+
+  try {
+    // Prvi pokušaj sa većim limitom da pokrijemo više stranica shopa
+    crawlResult = await firecrawl.crawlUrl(competitor.base_url, {
+      // Umjereniji limit da izbjegnemo Firecrawl 402, ali i dalje pokrivamo više paginacijskih stranica
       limit: 100,
       maxDepth: 3,
-      includePaths: ['/shop', '/shop.*', '/shop/.*'],
-      allowExternalLinks: false,
-    },
-    scrapeOptions: {
-      formats: ['html'],
-      onlyMainContent: false,
-      waitFor: 1500,
-      timeout: 60000,
-    },
-  });
+      crawlerOptions: {
+        limit: 100,
+        maxDepth: 3,
+        includePaths: ['/shop', '/shop.*', '/shop/.*'],
+        allowExternalLinks: false,
+      },
+      scrapeOptions: {
+        formats: ['html'],
+        onlyMainContent: false,
+        waitFor: 1500,
+        timeout: 60000,
+      },
+    });
+  } catch (error) {
+    console.error(`[SCRAPER] Firecrawl crawlUrl failed for ${competitor.name} on first attempt:`, error);
+
+    const message = error instanceof Error ? error.message : String(error ?? '');
+
+    // Ako nemamo dovoljno kredita za veći limit, probaj ponovo sa manjim limitom
+    if (message.includes('402') || message.toLowerCase().includes('insufficient credits')) {
+      console.log(
+        `[SCRAPER] Detektovan Firecrawl 402 / insufficient credits za ${competitor.name}. ` +
+          'Pokušavam ponovo sa manjim limitom (30) i plićom dubinom (2)...'
+      );
+
+      try {
+        crawlResult = await firecrawl.crawlUrl(competitor.base_url, {
+          limit: 30,
+          maxDepth: 2,
+          scrapeOptions: {
+            formats: ['html'],
+            onlyMainContent: false,
+            waitFor: 1500,
+            timeout: 60000,
+          },
+        });
+      } catch (retryError) {
+        console.error(
+          `[SCRAPER] Ponovni Firecrawl crawlUrl neuspješan za ${competitor.name} sa manjim limitom:`,
+          retryError,
+        );
+        return [];
+      }
+    } else {
+      // Neki drugi error – prijavi i prekini za ovog konkurenta
+      return [];
+    }
+  }
 
   console.log(
     `[SCRAPER] Firecrawl returned ${crawlResult?.data?.length || 0} pages for ${competitor.name}`
