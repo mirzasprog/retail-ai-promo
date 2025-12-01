@@ -184,7 +184,12 @@ async function scrapeCompetitor(competitor: Competitor, firecrawl: any): Promise
 
   if (sourceType === 'pdf') {
     console.log('[SCRAPER] PDF source detected for competitor', competitor.name);
-    return [];
+    try {
+      return await scrapePdfSite(competitor, firecrawl);
+    } catch (error) {
+      console.error(`[SCRAPER] Error scraping PDF for ${competitor.name}:`, error);
+      return [];
+    }
   }
 
   if (sourceType !== 'html') {
@@ -192,13 +197,8 @@ async function scrapeCompetitor(competitor: Competitor, firecrawl: any): Promise
     return [];
   }
 
-  if (!competitor.base_url.includes('robot.ba')) {
-    console.log(`[SCRAPER] Skipping ${competitor.name} because only robot.ba scraping is supported in this version.`);
-    return [];
-  }
-
   try {
-    return await scrapeRobotSite(competitor, firecrawl);
+    return await scrapeHtmlSite(competitor, firecrawl);
   } catch (error) {
     console.error(`[SCRAPER] Error scraping ${competitor.name}:`, error);
     if (error instanceof Error) {
@@ -209,8 +209,8 @@ async function scrapeCompetitor(competitor: Competitor, firecrawl: any): Promise
   }
 }
 
-async function scrapeRobotSite(competitor: Competitor, firecrawl: any): Promise<Product[]> {
-  console.log(`[SCRAPER] Using robot.ba specific scraper for ${competitor.name}`);
+async function scrapeHtmlSite(competitor: Competitor, firecrawl: any): Promise<Product[]> {
+  console.log(`[SCRAPER] Using HTML scraper for ${competitor.name} with pagination support`);
 
   const crawlResult = await firecrawl.crawlUrl(competitor.base_url, {
     limit: 500,
@@ -260,8 +260,8 @@ async function scrapeRobotSite(competitor: Competitor, firecrawl: any): Promise<
   return deduped.slice(0, 150);
 }
 
-async function scrapeRobotPdf(competitor: Competitor, firecrawl: any): Promise<Product[]> {
-  console.log(`[SCRAPER] Using robot.ba PDF scraper for ${competitor.name}`);
+async function scrapePdfSite(competitor: Competitor, firecrawl: any): Promise<Product[]> {
+  console.log(`[SCRAPER] Using PDF scraper for ${competitor.name}`);
 
   const scrapeResult = await firecrawl.scrapeUrl(competitor.base_url, {
     formats: ['markdown', 'text'],
