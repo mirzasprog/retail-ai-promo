@@ -216,11 +216,13 @@ async function scrapeCompetitor(competitor: Competitor, config: ScraperConfig | 
   console.log(`[SCRAPER] Starting scrape for ${competitor.name} at ${competitor.base_url}`);
   const sourceType = (competitor.source_type?.toLowerCase() as SourceType) || 'html';
 
-  if (sourceType === 'html' || sourceType === 'api') {
-    const apiProducts = await scrapeWooCommerceStore(competitor.base_url, config);
-    if (apiProducts.length > 0) {
-      console.log(`[SCRAPER] Using WooCommerce Store API results for ${competitor.name}`);
-      return dedupeProducts(apiProducts);
+  // SPECIAL CASE: WooCommerce shop URL – prioritise WooCommerce API
+  if (competitor.base_url.includes('/shop')) {
+    console.log(`[SCRAPER] WooCommerce priority mode for ${competitor.name} (${competitor.base_url})`);
+    const wooProducts = await scrapeWooCommerceStore(competitor.base_url, config);
+    console.log(`[SCRAPER] WooCommerce priority scraper returned ${wooProducts.length} products for ${competitor.name}`);
+    if (wooProducts.length > 0) {
+      return dedupeProducts(wooProducts);
     }
   }
 
@@ -277,6 +279,7 @@ async function scrapeHtmlSite(competitor: Competitor, config: ScraperConfig | nu
 
     try {
       const html = await fetchText(nextUrl);
+      console.log(`[SCRAPER][HTML] Fetched ${nextUrl}, length=${html?.length || 0}`);
       if (!html) continue;
 
       const domProducts = extractProductsFromDom(html, nextUrl, config);
@@ -408,11 +411,11 @@ async function scrapeImageSource(competitor: Competitor, config: ScraperConfig |
 async function scrapeWooCommerceStore(baseUrl: string, config: ScraperConfig | null): Promise<ScrapedProduct[]> {
   try {
     const origin = normalizeOrigin(baseUrl);
+    if (!origin) return [];
+
     const perPage = 100;
     const maxPages = 10;
     const collected: ScrapedProduct[] = [];
-
-    if (!origin) return collected;
 
     for (let page = 1; page <= maxPages; page++) {
       const apiUrl = `${origin}/wp-json/wc/store/products?page=${page}&per_page=${perPage}`;
